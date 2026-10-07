@@ -1,13 +1,16 @@
 <script setup>
 import { state } from '../store.js'
 
+const props = defineProps({ tracks: { type: Array, default: null } })
+function list() { return props.tracks || state.tracks; }
+
 function toggleSel(id, ev) {
   if (ev.target.checked) state.selected.add(id);
   else state.selected.delete(id);
 }
 function toggleAll(ev) {
   const on = ev.target.checked;
-  state.tracks.forEach(t => { if (on) state.selected.add(t.id); else state.selected.delete(t.id); });
+  list().forEach(t => { if (on) state.selected.add(t.id); else state.selected.delete(t.id); });
 }
 function openEdit(t) {
   state.currentId = t.id;
@@ -20,7 +23,7 @@ function fmtDur(sec) {
   return m + ':' + String(s).padStart(2, '0');
 }
 function artists(t) { return (t.tags.ARTIST || '').split(' / ').join(', '); }
-const allChecked = () => state.tracks.length > 0 && state.selected.size === state.tracks.length;
+const allChecked = () => list().length > 0 && state.selected.size === list().length;
 </script>
 
 <template>
@@ -32,7 +35,7 @@ const allChecked = () => state.tracks.length > 0 && state.selected.size === stat
       </tr>
     </thead>
     <tbody>
-      <tr v-for="t in state.tracks" :key="t.id" style="cursor:pointer" @click="openEdit(t)">
+      <tr v-for="t in list()" :key="t.id" style="cursor:pointer" @click="openEdit(t)">
         <td style="text-align:center" @click.stop><input type="checkbox" class="tchk" :checked="state.selected.has(t.id)" @change="toggleSel(t.id, $event)" /></td>
         <td><img class="thumb" :src="`/api/tracks/${encodeURIComponent(t.id)}/cover`" onerror="this.style.visibility='hidden'" /></td>
         <td>{{ t.tags.TITLE || t.fileName }}</td>

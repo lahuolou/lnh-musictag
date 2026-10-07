@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import { state, logout } from './store.js'
 import { api } from './api.js'
 import Login from './views/Login.vue'
@@ -9,6 +9,13 @@ import Dedup from './views/Dedup.vue'
 import Batch from './views/Batch.vue'
 import Settings from './views/Settings.vue'
 import Toast from './components/Toast.vue'
+
+const theme = ref(localStorage.getItem('lnh-theme') || (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'))
+function applyTheme() {
+  document.documentElement.dataset.theme = theme.value;
+  localStorage.setItem('lnh-theme', theme.value);
+}
+function toggleTheme() { theme.value = theme.value === 'dark' ? 'light' : 'dark'; applyTheme(); }
 
 function route() {
   const h = state.route || location.hash.slice(1) || '/';
@@ -30,6 +37,7 @@ window.addEventListener('unauth', () => {
 });
 
 onMounted(async () => {
+  applyTheme();
   try {
     const m = await api('/api/me');
     state.authed = true;
@@ -51,6 +59,7 @@ onMounted(async () => {
       <button class="navlink" :class="{ on: route() === 'batch' }" @click="go('/batch')">批量</button>
       <span class="spacer"></span>
       <span class="badge">{{ state.fpActive ? '指纹: 启用' : '指纹: 未启用' }}</span>
+      <button class="navlink" :title="theme === 'dark' ? '切换到白天模式' : '切换到黑夜模式'" @click="toggleTheme">{{ theme === 'dark' ? '🌙' : '☀️' }}</button>
       <button class="navlink" :class="{ on: route() === 'settings' }" @click="go('/settings')">⚙️ 设置</button>
       <button class="ghost sm" @click="logout">退出</button>
     </nav>

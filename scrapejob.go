@@ -18,6 +18,110 @@ import (
 // Sources are rate-limited, so a short delay is applied between tracks when
 // scraping more than one.
 
+// ScrapeFields selects which metadata fields to write during scraping.
+type ScrapeFields struct {
+	Cover       bool
+	Title       bool
+	Artist      bool
+	Album       bool
+	AlbumArtist bool
+	Genre       bool
+	Year        bool
+	TrackNumber bool
+	Lyrics      bool
+}
+
+// allMetadataFields returns fields with every metadata tag enabled but no
+// cover/lyrics (which are controlled separately by the caller's fetch flags).
+func allMetadataFields() ScrapeFields {
+	return ScrapeFields{
+		Title: true, Artist: true, Album: true, AlbumArtist: true,
+		Genre: true, Year: true, TrackNumber: true,
+	}
+}
+
+// fieldsFromList converts an explicit list of selected field names (from the
+// UI) into ScrapeFields. An empty list falls back to all metadata plus the
+// legacy cover/lyrics fetch flags.
+func fieldsFromList(list []string, fetchCover, fetchLyrics bool) ScrapeFields {
+	if len(list) == 0 {
+		f := allMetadataFields()
+		f.Cover = fetchCover
+		f.Lyrics = fetchLyrics
+		return f
+	}
+	set := map[string]bool{}
+	for _, s := range list {
+		set[strings.ToLower(strings.TrimSpace(s))] = true
+	}
+	has := func(keys ...string) bool {
+		for _, k := range keys {
+			if set[k] {
+				return true
+			}
+		}
+		return false
+	}
+	return ScrapeFields{
+		Cover:       has("cover", "海报", "封面"),
+		Title:       has("title", "歌名"),
+		Artist:      has("artist", "艺术家"),
+		Album:       has("album", "专辑"),
+		AlbumArtist: has("albumartist", "专辑艺术家"),
+		Genre:       has("genre", "流派"),
+		Year:        has("year", "年代"),
+		TrackNumber: has("tracknumber", "曲目号"),
+		Lyrics:      has("lyrics", "歌词"),
+	}
+}
+
+// trackHasField reports whether a track already carries a value for field.
+// field is a taglibx constant (e.g. taglibx.Title) or "cover"/"lyrics".
+func trackHasField(t *model.Track, field string) bool {
+	switch field {
+	case "cover":
+		return t.HasCover
+	case "lyrics":
+		return strings.TrimSpace(t.Tags["LYRICS"]) != ""
+	default:
+		return strings.TrimSpace(t.Tags[field]) != ""
+	}
+}
+
+// applySkipFilled drops fields whose value the track already has. It returns
+// true if at least one field remains to be written.
+func applySkipFilled(t *model.Track, f *ScrapeFields) bool {
+	if f.Title && trackHasField(t, taglibx.Title) {
+		f.Title = false
+	}
+	if f.Artist && trackHasField(t, taglibx.Artist) {
+		f.Artist = false
+	}
+	if f.Album && trackHasField(t, taglibx.Album) {
+		f.Album = false
+	}
+	if f.AlbumArtist && trackHasField(t, taglibx.AlbumArtist) {
+		f.AlbumArtist = false
+	}
+	if f.Genre && trackHasField(t, taglibx.Genre) {
+		f.Genre = false
+	}
+	if f.Year && trackHasField(t, taglibx.Date) {
+		f.Year = false
+	}
+	if f.TrackNumber && trackHasField(t, taglibx.TrackNumber) {
+		f.TrackNumber = false
+	}
+	if f.Cover && trackHasField(t, "cover") {
+		f.Cover = false
+	}
+	if f.Lyrics && trackHasField(t, "lyrics") {
+		f.Lyrics = false
+	}
+	return f.Cover || f.Title || f.Artist || f.Album || f.AlbumArtist ||
+		f.Genre || f.Year || f.TrackNumber || f.Lyrics
+}
+
 type scrapeJob struct {
 	ID      string         `json:"id"`
 	Total   int            `json:"total"`
@@ -64,6 +168,8 @@ func batchScrapeHandler(js *jobStore, store *store, ms *scrape.MultiSource, fp d
 			FetchCover  bool     `json:"fetchCover"`
 			FetchLyrics bool     `json:"fetchLyrics"`
 			Source      string   `json:"source"`
+			Fields      []string `json:"fields"`
+			SkipFilled  bool     `json:"skipFilled"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -76,8 +182,9 @@ func batchScrapeHandler(js *jobStore, store *store, ms *scrape.MultiSource, fp d
 		if req.Source == "" {
 			req.Source = "auto"
 		}
+		fields := fieldsFromList(req.Fields, req.FetchCover, req.FetchLyrics)
 		job := js.create(len(req.IDs))
-		go runBatch(job, store, ms, fp, req.Source, req.IDs, req.FetchCover, req.FetchLyrics)
+		go runBatch(job, store, ms, fp, req.Source, req.IDs, fields, req.SkipFilled)
 		writeJSON(w, http.StatusOK, map[string]any{"jobId": job.ID, "total": job.Total})
 	}
 }
@@ -96,7 +203,7 @@ func jobProgressHandler(js *jobStore) http.HandlerFunc {
 	}
 }
 
-func runBatch(job *scrapeJob, store *store, ms *scrape.MultiSource, fp dedup.Fingerprinter, source string, ids []string, fetchCover, fetchLyrics bool) {
+func runBatch(job *scrapeJob, store *store, ms *scrape.MultiSource, fp dedup.Fingerprinter, source string, ids []string, fields ScrapeFields, skipFilled bool) {
 	defer func() {
 		job.mu.Lock()
 		job.Status = "done"
@@ -117,7 +224,7 @@ func runBatch(job *scrapeJob, store *store, ms *scrape.MultiSource, fp dedup.Fin
 		job.Current = t.FileName
 		job.mu.Unlock()
 
-		msg, ok := scrapeOneTrack(t, ms, source, fetchCover, fetchLyrics, store, fp)
+		msg, ok := scrapeOneTrack(t, ms, source, fields, skipFilled, store, fp)
 		job.mu.Lock()
 		job.Results = append(job.Results, scrapeResult{ID: t.ID, FileName: t.FileName, OK: ok, Message: msg})
 		job.Done++
@@ -130,9 +237,19 @@ func runBatch(job *scrapeJob, store *store, ms *scrape.MultiSource, fp dedup.Fin
 }
 
 // scrapeOneTrack auto-scrapes a single track: search by its current title +
-// artist on the given source, pick the best result, write tags and optionally
-// fetch the cover and/or lyrics. Returns (message, ok).
-func scrapeOneTrack(t *model.Track, ms *scrape.MultiSource, source string, fetchCover, fetchLyrics bool, store *store, fp dedup.Fingerprinter) (string, bool) {
+// artist on the given source, pick the best result, write only the enabled
+// fields and optionally fetch the cover and/or lyrics. When skipFilled is set,
+// fields the track already carries are left untouched (smart skip to save
+// hardware); if nothing needs filling, the track is skipped without searching.
+// Returns (message, ok).
+func scrapeOneTrack(t *model.Track, ms *scrape.MultiSource, source string, fields ScrapeFields, skipFilled bool, store *store, fp dedup.Fingerprinter) (string, bool) {
+	if skipFilled {
+		// Drop already-filled fields; if nothing remains, skip without searching.
+		if !applySkipFilled(t, &fields) {
+			return "已有完整标签，智能跳过", true
+		}
+	}
+
 	title := strings.TrimSpace(t.Tags["TITLE"])
 	artist := strings.TrimSpace(t.Tags["ARTIST"])
 	query := strings.TrimSpace(title + " " + artist)
@@ -149,24 +266,27 @@ func scrapeOneTrack(t *model.Track, ms *scrape.MultiSource, source string, fetch
 	sr := pickBest(results)
 	ms.Enrich(&sr) // 补全专辑艺术家/流派/年代/曲目号
 
-	tags := map[string][]string{taglibx.Title: {stripAudioExt(sr.Title)}}
-	if len(sr.Artists) > 0 {
+	tags := map[string][]string{}
+	if fields.Title && stripAudioExt(strings.TrimSpace(sr.Title)) != "" {
+		tags[taglibx.Title] = []string{stripAudioExt(strings.TrimSpace(sr.Title))}
+	}
+	if fields.Artist && len(sr.Artists) > 0 {
 		tags[taglibx.Artist] = sr.Artists
 	}
-	if sr.Album != "" {
+	if fields.Album && sr.Album != "" {
 		tags[taglibx.Album] = []string{sr.Album}
 	}
-	if len(sr.AlbumArtist) > 0 {
+	if fields.AlbumArtist && len(sr.AlbumArtist) > 0 {
 		tags[taglibx.AlbumArtist] = sr.AlbumArtist
 	}
-	if len(sr.Genre) > 0 {
+	if fields.Genre && len(sr.Genre) > 0 {
 		tags[taglibx.Genre] = sr.Genre
 	}
-	if sr.TrackNumber > 0 {
-		tags[taglibx.TrackNumber] = []string{strconv.Itoa(sr.TrackNumber)}
-	}
-	if sr.Date != "" {
+	if fields.Year && sr.Date != "" {
 		tags[taglibx.Date] = []string{sr.Date}
+	}
+	if fields.TrackNumber && sr.TrackNumber > 0 {
+		tags[taglibx.TrackNumber] = []string{strconv.Itoa(sr.TrackNumber)}
 	}
 	if sr.Source == "musicbrainz" && sr.SourceID != "" {
 		tags[taglibx.MBTrackID] = []string{sr.SourceID}
@@ -174,29 +294,38 @@ func scrapeOneTrack(t *model.Track, ms *scrape.MultiSource, source string, fetch
 	if sr.ReleaseMBID != "" {
 		tags[taglibx.MBAlbumID] = []string{sr.ReleaseMBID}
 	}
-	if fetchLyrics {
+	if fields.Lyrics {
 		if lyric, err := ms.FetchLyrics(sr); err == nil && strings.TrimSpace(lyric) != "" {
 			tags[taglibx.Lyrics] = []string{lyric}
 		}
 	}
-	if err := taglibx.WriteTags(t.Path, tags, false); err != nil {
-		return "写标签失败: " + err.Error(), false
+	if len(tags) > 0 {
+		if err := taglibx.WriteTags(t.Path, tags, false); err != nil {
+			return "写标签失败: " + err.Error(), false
+		}
 	}
-	if fetchCover {
+	if fields.Cover {
 		if img, err := ms.FetchCover(sr); err == nil && len(img) > 0 {
 			taglibx.WriteCover(t.Path, img)
 		}
 	}
 	refreshTrack(store, t.Path, fp)
-	album := ""
-	if sr.Album != "" {
-		album = " / " + sr.Album
+
+	var wrote []string
+	if fields.Title {
+		wrote = append(wrote, "歌名")
 	}
-	extra := ""
-	if fetchLyrics {
-		extra = " +歌词"
+	if fields.Cover {
+		wrote = append(wrote, "海报")
 	}
-	return "刮削完成: " + sr.Title + album + extra, true
+	if fields.Lyrics {
+		wrote = append(wrote, "歌词")
+	}
+	msg := "刮削完成"
+	if len(wrote) > 0 {
+		msg += ": " + strings.Join(wrote, "+")
+	}
+	return msg, true
 }
 
 // pickBest chooses the first result that has an album, else the first result.

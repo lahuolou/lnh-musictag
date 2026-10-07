@@ -1,10 +1,17 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { state, toast, refresh, loadSources } from '../store.js'
 import { api } from '../api.js'
 import TrackTable from '../components/TrackTable.vue'
 
 const totalMin = computed(() => Math.round(state.tracks.reduce((a, t) => a + (t.duration || 0), 0) / 60))
+const q = ref('')
+const filtered = computed(() => {
+  const kw = q.value.trim().toLowerCase();
+  if (!kw) return state.tracks;
+  return state.tracks.filter(t =>
+    [t.tags.TITLE || '', t.tags.ARTIST || '', t.tags.ALBUM || '', t.fileName].join(' ').toLowerCase().includes(kw));
+})
 let poll = null
 
 async function scan() {
@@ -75,9 +82,12 @@ onBeforeUnmount(stopPoll);
     <div class="panel">
       <div class="row" style="justify-content:space-between">
         <h2 style="margin:0">曲目列表</h2>
-        <button class="ghost sm" @click="renameFiles" :disabled="state.scanStatus.running">重命名文件(去多后缀)</button>
+        <div class="row" style="gap:6px">
+          <input type="text" v-model="q" placeholder="搜索标题/艺术家/专辑/文件名" style="min-width:260px" />
+          <button class="ghost sm" @click="renameFiles" :disabled="state.scanStatus.running">重命名文件(去多后缀)</button>
+        </div>
       </div>
-      <div style="max-height:520px;overflow:auto"><TrackTable /></div>
+      <div style="max-height:520px;overflow:auto"><TrackTable :tracks="filtered" /></div>
     </div>
   </div>
 </template>

@@ -3,6 +3,13 @@
   --text:#e6e8ee; --muted:#8b93a3; --accent:#4f8cff; --accent2:#2f6fe0;
   --ok:#35c46a; --warn:#e5a63b; --err:#e05252;
 }
+/* 白天模式：现代扁平浅色 */
+:root[data-theme="light"]{
+  --bg:#f4f6f9; --panel:#ffffff; --panel2:#eef1f5; --line:#e2e6ec;
+  --text:#1b2230; --muted:#5b6474; --accent:#2f6fe0; --accent2:#2f6fe0;
+  --ok:#168a43; --warn:#b9790f; --err:#d33737;
+}
+.field-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(126px,1fr));gap:8px 12px}
 *{box-sizing:border-box}
 body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text)}
 header{padding:16px 24px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--panel)}

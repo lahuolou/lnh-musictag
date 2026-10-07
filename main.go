@@ -456,32 +456,40 @@ func main() {
 			CoverURL    string   `json:"coverURL"`
 			FetchCover  bool     `json:"fetchCover"`
 			FetchLyrics bool     `json:"fetchLyrics"`
+			Fields      []string `json:"fields"` // 手动选择要写入的字段
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
+		fields := fieldsFromList(req.Fields, req.FetchCover, req.FetchLyrics)
 		tags := map[string][]string{}
-		if v := stripAudioExt(strings.TrimSpace(req.Title)); v != "" {
-			tags[taglibx.Title] = []string{v}
+		if fields.Title {
+			if v := stripAudioExt(strings.TrimSpace(req.Title)); v != "" {
+				tags[taglibx.Title] = []string{v}
+			}
 		}
-		if len(req.Artists) > 0 {
+		if fields.Artist && len(req.Artists) > 0 {
 			tags[taglibx.Artist] = req.Artists
 		}
-		if v := strings.TrimSpace(req.Album); v != "" {
-			tags[taglibx.Album] = []string{v}
+		if fields.Album {
+			if v := strings.TrimSpace(req.Album); v != "" {
+				tags[taglibx.Album] = []string{v}
+			}
 		}
-		if len(req.AlbumArtist) > 0 {
+		if fields.AlbumArtist && len(req.AlbumArtist) > 0 {
 			tags[taglibx.AlbumArtist] = req.AlbumArtist
 		}
-		if len(req.Genre) > 0 {
+		if fields.Genre && len(req.Genre) > 0 {
 			tags[taglibx.Genre] = req.Genre
 		}
-		if req.TrackNumber > 0 {
+		if fields.TrackNumber && req.TrackNumber > 0 {
 			tags[taglibx.TrackNumber] = []string{strconv.Itoa(req.TrackNumber)}
 		}
-		if v := strings.TrimSpace(req.Date); v != "" {
-			tags[taglibx.Date] = []string{v}
+		if fields.Year {
+			if v := strings.TrimSpace(req.Date); v != "" {
+				tags[taglibx.Date] = []string{v}
+			}
 		}
 		if v := strings.TrimSpace(req.SourceID); v != "" {
 			switch req.Source {
@@ -494,7 +502,7 @@ func main() {
 		if v := strings.TrimSpace(req.ReleaseMBID); v != "" {
 			tags[taglibx.MBAlbumID] = []string{v}
 		}
-		if req.FetchLyrics && req.Title != "" {
+		if fields.Lyrics && req.Title != "" {
 			if lyric, err := ms.FetchLyrics(scrape.SearchResult{
 				Source: req.Source, SourceID: req.SourceID,
 				Title: req.Title, Artists: req.Artists,
@@ -506,7 +514,7 @@ func main() {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		if req.FetchCover {
+		if fields.Cover {
 			if img, err := ms.FetchCover(scrape.SearchResult{
 				Source: req.Source, ReleaseMBID: req.ReleaseMBID,
 				CoverURL: req.CoverURL, AlbumID: req.AlbumID,

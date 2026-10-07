@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch } from 'vue'
+import { reactive, ref, watch } from 'vue'
 import { state, cur, toast, refresh } from '../store.js'
 import { api } from '../api.js'
 
@@ -8,6 +8,20 @@ const sQuery = ref('')
 const sSource = ref('auto')
 const searching = ref(false)
 let lastId = null
+
+// 手动刮削要写入的字段（可选）
+const sf = reactive({
+  title: true, artist: true, albumArtist: true, genre: true, year: true, trackNumber: true, lyrics: true
+})
+const sfCover = ref(true)
+
+function selFields(withCover) {
+  const names = [];
+  const m = { title: 'title', artist: 'artist', albumArtist: 'albumArtist', genre: 'genre', year: 'year', trackNumber: 'trackNumber', lyrics: 'lyrics' };
+  for (const k in m) { if (sf[k]) names.push(m[k]); }
+  if (withCover) names.push('cover');
+  return names;
+}
 
 function loadTrack(t) {
   if (!t) return;
@@ -84,7 +98,8 @@ async function apply(i, withCover) {
     album: r.album, albumArtist: r.albumArtist || [], genre: r.genre || [],
     trackNumber: r.trackNumber || 0, date: r.date,
     coverURL: r.coverURL, albumID: r.albumID || '',
-    releaseMBID: r.releaseMBID || '', fetchCover: withCover
+    releaseMBID: r.releaseMBID || '', fetchCover: withCover,
+    fields: selFields(withCover)
   };
   try {
     await api('/api/tracks/' + encodeURIComponent(state.currentId) + '/scrape', { method: 'POST', body: JSON.stringify(body) });
@@ -141,6 +156,19 @@ const t = cur;
 
     <div v-if="searching" class="loading" style="margin-top:8px">搜索…</div>
     <div v-else-if="state.mbRes.length === 0" class="muted" style="margin-top:8px">尚无搜索结果</div>
+    <div v-else>
+      <label style="margin:10px 0 4px">应用字段（可选）</label>
+      <div class="field-grid">
+        <label class="chk"><input type="checkbox" class="tchk" v-model="sf.title" /> 歌名</label>
+        <label class="chk"><input type="checkbox" class="tchk" v-model="sf.artist" /> 艺术家</label>
+        <label class="chk"><input type="checkbox" class="tchk" v-model="sf.albumArtist" /> 专辑艺术家</label>
+        <label class="chk"><input type="checkbox" class="tchk" v-model="sf.genre" /> 流派</label>
+        <label class="chk"><input type="checkbox" class="tchk" v-model="sf.year" /> 年代</label>
+        <label class="chk"><input type="checkbox" class="tchk" v-model="sf.trackNumber" /> 曲目号</label>
+        <label class="chk"><input type="checkbox" class="tchk" v-model="sf.lyrics" /> 歌词</label>
+        <label class="chk"><input type="checkbox" class="tchk" v-model="sfCover" /> 海报</label>
+      </div>
+    </div>
     <div v-for="(r, i) in state.mbRes" :key="i" class="res-item">
       <div class="row" style="gap:10px;align-items:flex-start">
         <img v-if="r.coverURL" class="thumb" :src="r.coverURL" onerror="this.style.visibility='hidden'" />
