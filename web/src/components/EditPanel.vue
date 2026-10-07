@@ -81,7 +81,9 @@ async function apply(i, withCover) {
   if (!r || !cur()) return;
   const body = {
     source: r.source, sourceId: r.sourceId, title: r.title, artists: r.artists || [],
-    album: r.album, date: r.date, coverURL: r.coverURL, albumID: r.albumID || '',
+    album: r.album, albumArtist: r.albumArtist || [], genre: r.genre || [],
+    trackNumber: r.trackNumber || 0, date: r.date,
+    coverURL: r.coverURL, albumID: r.albumID || '',
     releaseMBID: r.releaseMBID || '', fetchCover: withCover
   };
   try {

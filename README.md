@@ -1,50 +1,53 @@
 # LNH-MusicTag
 
-纯 **Docker 部署**的自托管 Web 音乐标签工具（形态类似 Music Tag Web）：**标签读写 + 歌曲去重 + 多源元数据/歌词刮削 + 批量修正**，全部操作通过浏览器后台完成，无本地 CLI。
+纯 **Docker 部署**的自托管 Web 音乐标签工具（形态类似 Music Tag Web）：**标签读写 + 歌曲去重 + 多源元数据/歌词刮削 + 批量修正 + 异步扫描**，全部操作通过浏览器后台完成，无本地 CLI。
 
-技术栈：**Go 后端（go-taglib WASM 封装 TagLib v2.1，无 CGo）+ 纯 Go SHA256 去重 + 多刮削源（MusicBrainz / iTunes / 网易云 / QQ音乐）+ 歌词（网易云 / lrclib）+ Vue3 前端（多页面：登录 / 主页 / 设置）**。
+技术栈：**Go 后端（go-taglib WASM 封装 TagLib，无 CGo）+ 纯 Go SHA256 去重 + 11 个刮削源 + 歌词 + Vue3 多页面前端**，配置存 **SQLite**（不依赖环境变量）。
 
-前端用 **Vue 3 + Vite**（比 React 运行时更轻），构建产物仅约 90KB JS（gzip 34KB），`go:embed` 进单个静态二进制，Docker 多阶段（node 构建前端 → Go 编译 → scratch），运行时无 node/前端依赖、不额外占内存。
+前端用 **Vue 3 + Vite**（比 React 运行时更轻），构建产物约 90KB JS，`go:embed` 进单个静态二进制，Docker 多阶段构建（node → Go → scratch），运行时无 node 依赖、不额外占内存。
 
 ## 核心能力
 
 | 能力 | 实现 | 说明 |
 |---|---|---|
-| ① 标签读写 | `go.senan.xyz/taglib`（WASM TagLib，无 CGo，MP3/FLAC/M4A/OGG/WAV/WMA…），多值标签、内嵌封面 | 写标签/封面/歌词 |
-| ② 歌曲去重 | SHA256 文件哈希（默认）+ 音频指纹（可插拔） | ④ 重复检测 |
-| ③ 多源刮削 | MusicBrainz（国际）/ iTunes（国际）/ 网易云 / QQ音乐（国内） | 搜索/应用刮削可选源，含封面 |
-| ④ 歌词 | 网易云 LRC（国内）+ lrclib（国际），自动选择 | 单曲获取/编辑/保存，批量「含歌词」 |
-| ⑤ 批量 | 勾选曲目 → 批量刮削（含封面/含歌词/选源）+ 进度条 | ⑤ 批量刮削 |
-| ⑥ 批量修正标题 | 去音频后缀（`广岛之恋.mp3 → 广岛之恋`） | 「修正标题(去后缀)」 |
+| ① 标签读写 | `go.senan.xyz/taglib`（WASM，无 CGo，MP3/FLAC/M4A/OGG/WAV/WMA…），多值标签、内嵌封面 | 写标题/艺术家/专辑/专辑艺术家/流派/年份/曲目号/封面/歌词 |
+| ② 异步扫描 | `/api/scan` 后台任务，**边扫边入库**；前端轮询 `/api/scan/status` 增量渲染曲目，不等全部扫完 | 扫描期间即见曲目 |
+| ③ 歌曲去重 | SHA256 文件哈希（默认）+ 音频指纹（可插拔） | 去重页 |
+| ④ 多源刮削 | **11 个源**：MusicBrainz / iTunes / 网易云 / QQ / 酷狗 / 酷我 / 咪咕 / 哔哩哔哩 / 汽水 / 波点 / 千千 | 搜索/应用，自动依次尝试 |
+| ⑤ 补全元数据 | MusicBrainz release 详情回填**专辑艺术家、流派、年代、曲目号**；写入标签 | 批量/单曲刮削均可 |
+| ⑥ 歌词 | 网易云 LRC + lrclib，自动选择 | 单曲获取/编辑/保存，批量「含歌词」 |
+| ⑦ 批量 | 勾选曲目 → 批量刮削（含封面/含歌词/选源）+ 进度条 | 批量页 |
+| ⑧ 去后缀默认执行 | 循环去除末尾音频后缀（`发如雪.mp3.flac → 发如雪`），扫描时默认开启 | 可在设置关闭 |
+| ⑨ 配置存数据库 | 账号/密码/API Key/选项存 `SQLite`（`/config/lnh.db`），不再用环境变量 | 设置页读写 |
 
 ## 快速开始（Docker）
 
-前置：目标机已装 Docker（含 compose）。镜像为多阶段构建的静态二进制（`scratch` 运行层，约 10MB，带 CA 证书，构建时按目标机架构自动适配）。
+前置：目标机已装 Docker（含 compose）。镜像为多阶段构建的静态二进制（scratch 运行层，约 10MB，带 CA 证书，构建时按目标机架构自动适配）。
 
 ```bash
-# 1) 在项目目录构建并启动
+# 1) 在项目目录构建并启动（或直接拉 GHCR 镜像）
 cd /path/to/LNH-musictag
-docker compose up -d --build
+docker compose up -d
 
-# 2) 先编辑 docker-compose.yml，把 volumes 里的 D:/Music 改成你的真实音乐目录
+# 2) 编辑 docker-compose.yml，把 /mnt/sata3-1/mp3 改成你的真实音乐目录
 ```
 
 浏览器访问 **http://<主机IP>:10248**：
 
-0. **登录页**：账号默认 `admin`（compose 的 `LNH_ADMIN_USER`）。密码：
-   - `LNH_ADMIN_PASS` **留空** → 首次启动自动生成**随机初始密码**，打印在容器日志（`docker compose logs`），并持久化到配置卷 `/config`（重启不丢失）。
-   - 或直接在 compose 里填 `LNH_ADMIN_PASS=你的密码` 固定。
-1. **主页**：输入音频目录的**容器内路径**（如 `/music`）→ 扫描 → 左侧点曲目编辑/刮削/歌词 → 底部批量
-2. **设置页**：右上角「⚙️ 设置」进入，可**修改密码**（不强制，随时可改/可返回）
+1. **登录页**：账号默认 `admin`。**首次启动自动生成随机初始密码**，打印在容器日志（`docker compose logs`），登录后到「设置」页修改（密码保存在数据库）。
+2. **曲目页**：输入音频目录的**容器内路径**（如 `/music`）→ 点「扫描」→ **边扫边出**，点某行进入编辑。
+3. **编辑页**：单曲编辑标签、获取歌词、按源刮削。
+4. **去重页 / 批量页 / 设置页**：左侧导航切换。
+
+> 账号、密码、AcoustID Key、默认目录、是否自动去后缀等均保存在 **`/config/lnh.db`**（SQLite）。环境变量仅在**首次启动**作为一次性初始化种子，之后以数据库为准。
 
 路径说明：容器里看到的是挂载后的路径，例如
 - 宿主 `/mnt/sata3-1/mp3` → 容器 `/music`，扫描填 `/music`（compose 默认已挂载此路径）
-- 宿主 `/mnt/sata3-1/mp3/pop` → 容器 `/music/pop`，扫描填 `/music/pop`
 
 注意事项：
-- **后台账号密码与音乐路径都已写在 `docker-compose.yml`**，部署时按需修改 `LNH_ADMIN_PASS` 和 `volumes` 即可。
 - 音乐卷**必须可读写**（应用会把标签/封面/歌词写回文件），compose 里默认就是读写，别改成 `:ro`。
-- 可选启用 AcoustID：在 compose 的 `environment` 里填 `ACOUSTID_API_KEY`。
+- 配置卷 `lnh_config:/config` 保存数据库（密码/Key/选项）与扫描进度，重启不丢失。
+- 可选启用 AcoustID 指纹识别：在「设置」页填 API Key（也可用 compose 环境变量做首次种子）。
 - 关闭：`docker compose down`；查看日志：`docker compose logs -f`。
 
 ## 项目结构
@@ -52,82 +55,76 @@ docker compose up -d --build
 ```
 LNH-musictag/
   Dockerfile              # 多阶段：node 构建前端 → Go 静态编译 → scratch
-  docker-compose.yml      # 端口 10248、音乐卷、环境变量
+  docker-compose.yml      # 端口 10248、音乐卷、配置卷
   .dockerignore
-  main.go                 # HTTP 服务、路由、内存存储、多源 handler、embed dist
-  auth.go                 # 登录鉴权、随机初始密码、改密持久化
-  helpers.go              # base64 / 远程抓取 / 标题去后缀
-  scrapejob.go            # 批量刮削后台任务（进度）
+  main.go                 # HTTP 服务、路由、内存存储、异步扫描、多源 handler、embed dist
+  auth.go                 # 登录鉴权、随机初始密码（数据库）、改密
+  helpers.go              # base64 / 远程抓取 / 循环去后缀
+  scrapejob.go            # 批量刮削后台任务（进度 + 元数据补全）
   internal/
     model/                # Track / DuplicateGroup
+    store/config.go       # SQLite 配置存储（账号/密码/Key/选项）
     taglibx/              # 标签读写封装（go-taglib，含 LYRICS 歌词）
     dedup/                # SHA256 去重 + Fingerprinter 接口
-    scrape/               # 多源：sources/itunes/netease/qq/musicbrainz + lyrics
+    scrape/               # 11 个源：sources/musicbrainz/itunes/netease/qq/kugou/kuwo/migu/bilibili/qishui/bodian/qianqian + lyrics
   web/                    # Vue3 + Vite 前端（构建产物 dist 被 go:embed 编译进二进制）
     src/
       main.js             # Vue 入口
-      App.vue             # 路由分发：未登录→登录页 / #/settings→设置页 / 其余→主页
+      App.vue             # 导航 + 多页面路由（曲目/编辑/去重/批量/设置）
       store.js            # 响应式全局状态 + API 封装
       api.js              # fetch 封装（401 自动跳登录）
-      views/Login.vue     # 登录页
-      views/Main.vue      # 主页（扫描/曲目列表/编辑刮削/去重/批量）
-      views/Settings.vue  # 设置页（修改密码，可关闭/返回）
+      views/              # Tracks / Edit / Dedup / Batch / Settings / Login
       components/         # TrackTable / EditPanel / DedupPanel / BatchPanel / Toast
 ```
 
 ## 刮削源
 
-| 源 | 类型 | 元数据 | 封面 | 歌词 |
-|---|---|---|---|---|
-| 自动 | - | 依次尝试 | 由命中的源决定 | 自动选择 |
-| MusicBrainz | 国际 | ✓ | Cover Art Archive ✓ | lrclib |
-| iTunes | 国际 | ✓ | artworkUrl ✓ | lrclib |
-| 网易云音乐 | 国内 | ✓ | 专辑详情兜底 ✓ | 网易云 LRC ✓ |
-| QQ音乐 | 国内 | ✓ | albummid ✓ | QQ 歌词 |
+| 源 | 类型 | 封面 | 歌词 |
+|---|---|---|---|
+| 自动 | 依次尝试 | 由命中的源决定 | 自动选择 |
+| MusicBrainz | 国际 | Cover Art Archive ✓ | lrclib |
+| iTunes | 国际 | artworkUrl ✓ | lrclib |
+| 网易云音乐 | 国内 | 专辑详情 ✓ | 网易云 LRC ✓ |
+| QQ音乐 | 国内 | albummid ✓ | QQ 歌词 |
+| 酷狗音乐 | 国内 | 专辑封面 ✓ | 自动 |
+| 酷我音乐 | 国内 | - | 自动 |
+| 咪咕音乐 | 国内 | picList ✓ | 自动 |
+| 哔哩哔哩 | 国内 | - | 自动 |
+| 汽水音乐 | 国内（Douyin，可能被反爬拦截） | - | 自动 |
+| 波点音乐 | 国内（无公开搜索接口，占位） | - | 自动 |
+| 千千音乐 | 国内（旧接口，可能失效） | - | 自动 |
 
-歌词自动策略：优先用命中的网易云/QQ 歌曲 ID 取歌词；否则按标题+艺术家搜网易云，再退 lrclib（国际）。
+> 汽水/波点/千千部分网络/机房可能被反爬拦截或接口失效；`auto` 会自动跳过失败源，依次尝试可用源。歌词优先用命中的国内源 ID 取 LRC，否则按标题+艺术家搜网易云，再退 lrclib。
 
 ## API 一览
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/login` | `{user,pass}` 后台登录，下发会话 cookie |
+| POST | `/api/login` | `{user,pass}` 登录，下发会话 cookie |
 | POST | `/api/logout` | 退出登录 |
-| GET | `/api/me` | 当前登录状态（200 已登录 / 401 未登录） |
-| POST | `/api/change-password` | `{oldPass,newPass}` 修改后台密码 |
-| POST | `/api/scan` | `{dir}` 扫描目录 |
-| GET | `/api/tracks` | 曲目列表 |
+| GET | `/api/me` | 登录状态 |
+| POST | `/api/change-password` | `{oldPass,newPass}` 改密码（存数据库） |
+| POST | `/api/scan` | `{dir}` 开始异步扫描，立即返回 |
+| GET | `/api/scan/status` | 扫描进度 `{running,added,total,done}` |
+| GET | `/api/tracks` | 曲目列表（扫描中可反复拉取增量渲染） |
 | GET | `/api/tracks/{id}/cover` | 读内嵌封面 |
 | POST | `/api/tracks/{id}/tags` | `{tags,clear}` 写标签（含 `LYRICS`） |
 | POST | `/api/tracks/{id}/cover` | `{url\|dataBase64\|clear}` 写封面 |
-| POST | `/api/tracks/fix-title` | `{ids}` 批量去音频后缀 |
+| POST | `/api/tracks/fix-title` | `{ids}` 批量去音频后缀（默认全部） |
 | GET | `/api/duplicates` | 重复分组（hash + fingerprint） |
+| GET | `/api/settings` | 读取数据库配置（不含密码） |
+| POST | `/api/settings` | 保存配置（账号/Key/选项/目录） |
 | GET | `/api/scrape/sources` | 可用刮削源列表 |
 | GET | `/api/scrape/search?q=&source=` | 按源搜索（source 可省略=auto） |
-| POST | `/api/tracks/{id}/scrape` | 应用刮削（写标签+封面+可选歌词） |
+| POST | `/api/tracks/{id}/scrape` | 应用刮削（写标签+封面+可选歌词，含补全元数据） |
 | GET | `/api/lyrics?source=&title=&artists=` | 获取歌词文本 |
 | POST | `/api/scrape/batch` | `{ids,fetchCover,fetchLyrics,source}` 批量刮削，返回 jobId |
-| GET | `/api/scrape/jobs/{id}` | 批量任务进度（done/total/current/results） |
-
-## 关于"指纹去重"（策略二）的现状与启用
-
-方案里的 **musiclab**（`github.com/drgolem/musiclab`，Chromaprint 指纹 + AcoustID 查询）已核实，但其 README 明确写着 **"Requires CGo for FLAC (libflac) and MP3 (mpg123) decoders"**，且为 `v0.0.0-...` 未发版模块，直接依赖会让 Docker 镜像编译链脆弱。
-
-因此指纹做了**可插拔**设计，不阻塞主链路：
-
-- `internal/dedup.Fingerprinter` 接口：`Fingerprint(path) (string, error)`
-- 默认实现 `FpcalcFingerprinter`：容器内存在 Chromaprint 的 `fpcalc` 命令则自动启用并做指纹去重；否则回退 `NoopFingerprinter`（仅 SHA256）。
-- 前端 ④ 面板顶部的"指纹：已启用/未启用"徽标即反映该状态。
-
-启用方式（二选一）：
-1. 在镜像中安装 Chromaprint（在 Dockerfile 运行层加入 `fpcalc`），最简单。
-2. 接入 musiclab 库（需在镜像编译阶段解决 libflac/mpg123 依赖），建议独立分支做。
+| GET | `/api/scrape/jobs/{id}` | 批量任务进度 |
 
 ## 已知限制
 
-- 服务监听 `:10248`（容器内全部接口），经 compose 映射到宿主 `10248`，局域网内可访问。
-- **刮削源各有速率限制**（MusicBrainz ~1 请求/秒）；批量刮削逐曲间已内置 1.1s 节流，几十上百首会较慢。
-- **QQ 音乐**在国内网络通常可用；某些网络/机房可能被 QQ 拦截（旧接口 502、新接口空结果），此时自动会退到网易云/lrclib。网易云接口部分场景需带浏览器 UA/Referer，已内置处理。
-- **歌词**：网易云对中文覆盖最好；国际歌曲走 lrclib。若命中的源无对应歌词，会返回"未找到歌词"，不影响标签/封面写入。
-- AcoustID 录音识别需注册 API key（`ACOUSTID_API_KEY`）；当前默认走文本搜索，无需 key。
+- 服务监听 `:10248`，经 compose 映射到宿主 `10248`，局域网内可访问。
+- **刮削源各有速率限制**（MusicBrainz ~1 请求/秒）；批量刮削逐曲间已内置 1.1s 节流。
+- 汽水/波点/千千依赖第三方接口，可能被反爬拦截或失效，`auto` 会自动跳过。
+- AcoustID 指纹识别需在「设置」页填 API Key；默认走文本搜索，无需 key。
 - 封面写入对 WAV 等容器依赖 TagLib 支持；主流 MP3/FLAC/M4A 均支持。

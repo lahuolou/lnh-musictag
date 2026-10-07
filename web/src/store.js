@@ -14,6 +14,7 @@ export const state = reactive({
   fpActive: false,
   scanDir: '/music',
   scanMsg: '',
+  scanStatus: { running: false, added: 0, total: 0, done: 0, error: '' },
   bSource: 'auto',
   bFetchCover: true,
   bFetchLyrics: false,
@@ -31,6 +32,16 @@ export function toast(msg, type = '') {
   state.toast.show = true;
   clearTimeout(state.toast._tm);
   state.toast._tm = setTimeout(() => (state.toast.show = false), 2600);
+}
+
+export async function loadSources() {
+  try { state.sources = await api('/api/scrape/sources'); }
+  catch (e) {
+    state.sources = [
+      { name: 'auto', label: '自动' }, { name: 'musicbrainz', label: 'MusicBrainz' },
+      { name: 'itunes', label: 'iTunes' }, { name: 'netease', label: '网易云' }, { name: 'qq', label: 'QQ音乐' }
+    ];
+  }
 }
 
 export async function refresh() {

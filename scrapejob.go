@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -146,13 +147,23 @@ func scrapeOneTrack(t *model.Track, ms *scrape.MultiSource, source string, fetch
 		return "无匹配结果", false
 	}
 	sr := pickBest(results)
+	ms.Enrich(&sr) // 补全专辑艺术家/流派/年代/曲目号
 
-	tags := map[string][]string{taglibx.Title: {sr.Title}}
+	tags := map[string][]string{taglibx.Title: {stripAudioExt(sr.Title)}}
 	if len(sr.Artists) > 0 {
 		tags[taglibx.Artist] = sr.Artists
 	}
 	if sr.Album != "" {
 		tags[taglibx.Album] = []string{sr.Album}
+	}
+	if len(sr.AlbumArtist) > 0 {
+		tags[taglibx.AlbumArtist] = sr.AlbumArtist
+	}
+	if len(sr.Genre) > 0 {
+		tags[taglibx.Genre] = sr.Genre
+	}
+	if sr.TrackNumber > 0 {
+		tags[taglibx.TrackNumber] = []string{strconv.Itoa(sr.TrackNumber)}
 	}
 	if sr.Date != "" {
 		tags[taglibx.Date] = []string{sr.Date}

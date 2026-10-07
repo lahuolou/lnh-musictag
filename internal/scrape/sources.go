@@ -6,20 +6,25 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
+	"strings"
 )
 
 // SearchResult is the unified metadata hit returned by any scrape source.
 type SearchResult struct {
-	Source      string   `json:"source"`
-	SourceID    string   `json:"sourceId"`
-	ReleaseMBID string   `json:"releaseMBID,omitempty"`
-	AlbumID     string   `json:"albumID,omitempty"`
-	Title       string   `json:"title"`
-	Artists     []string `json:"artists"`
-	Album       string   `json:"album"`
-	Date        string   `json:"date"`
-	Duration    int      `json:"duration"` // seconds
-	CoverURL    string   `json:"coverURL,omitempty"`
+	Source       string   `json:"source"`
+	SourceID     string   `json:"sourceId"`
+	ReleaseMBID  string   `json:"releaseMBID,omitempty"`
+	AlbumID      string   `json:"albumID,omitempty"`
+	Title        string   `json:"title"`
+	Artists      []string `json:"artists"`
+	Album        string   `json:"album"`
+	AlbumArtist  []string `json:"albumArtist,omitempty"`
+	Genre        []string `json:"genre,omitempty"`
+	Date         string   `json:"date"`         // year (YYYY) or full date
+	TrackNumber  int      `json:"trackNumber,omitempty"`
+	Duration     int      `json:"duration"` // seconds
+	CoverURL     string   `json:"coverURL,omitempty"`
 }
 
 // Source is a metadata provider. Search receives a plain text query.
@@ -49,6 +54,13 @@ func NewMultiSource() *MultiSource {
 	m.register(itunesSource{})
 	m.register(neteaseSource{})
 	m.register(qqSource{})
+	m.register(kugouSource{})
+	m.register(kuwoSource{})
+	m.register(miguSource{})
+	m.register(bilibiliSource{})
+	m.register(qishuiSource{})
+	m.register(bodianSource{})
+	m.register(qianqianSource{})
 	return m
 }
 
@@ -102,8 +114,38 @@ func (m *MultiSource) Search(name, query string, limit int) ([]SearchResult, err
 	return []SearchResult{}, nil
 }
 
+// Enrich fills album-artist, genre, release date and track number from the
+// source's release detail when available (currently MusicBrainz). Best-effort;
+// never returns an error.
+func (m *MultiSource) Enrich(sr *SearchResult) {
+	if sr == nil || sr.Source != "musicbrainz" || sr.ReleaseMBID == "" {
+		return
+	}
+	rd, err := m.client.ReleaseDetail(sr.ReleaseMBID)
+	if err != nil {
+		return
+	}
+	if len(rd.Artists) > 0 {
+		sr.AlbumArtist = rd.Artists
+	}
+	if len(rd.Genres) > 0 {
+		sr.Genre = rd.Genres
+	}
+	if rd.Date != "" {
+		sr.Date = rd.Date
+	}
+	for _, tr := range rd.Tracks {
+		if strings.EqualFold(strings.TrimSpace(tr.Title), strings.TrimSpace(sr.Title)) {
+			if n, e := strconv.Atoi(tr.Number); e == nil && n > 0 {
+				sr.TrackNumber = n
+			}
+			break
+		}
+	}
+}
+
 // FetchCover fetches cover art bytes for a result according to its source.
-// Returns (nil, nil) when the source has no cover.
+// Returns (nil, nil) when the source has no cover.// Returns (nil, nil) when the source has no cover.
 func (m *MultiSource) FetchCover(sr SearchResult) ([]byte, error) {
 	if sr.Source == "musicbrainz" && sr.ReleaseMBID != "" {
 		return m.client.FetchCover(sr.ReleaseMBID)
@@ -117,8 +159,7 @@ func (m *MultiSource) FetchCover(sr SearchResult) ([]byte, error) {
 	return nil, nil
 }
 
-// neteaseAlbumCover resolves cover art via the NetEase album detail endpoint
-// (the search API usually omits picUrl). Note: NetEase returns code -462 (a
+// neteaseAlbumCover resolves cover art via the NetEase album detail endpoint// (the search API usually omits picUrl). Note: NetEase returns code -462 (a
 // block) when Accept: application/json is sent, so this uses a plain request.
 func (c *Client) neteaseAlbumCover(albumID string) ([]byte, error) {
 	u := "https://music.163.com/api/album/" + url.PathEscape(albumID)
@@ -148,6 +189,21 @@ func (c *Client) neteaseAlbumCover(albumID string) ([]byte, error) {
 		return nil, nil
 	}
 	return c.getBytes(o.Album.PicURL+"?param=300y300", map[string]string{"Referer": "https://music.163.com/"})
+}
+
+// splitNames splits a combined artist/author string on ";", "、" and "/",
+// trimming empty parts, e.g. "周杰伦;费玉清" -> ["周杰伦","费玉清"].
+func splitNames(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ";") {
+		for _, q := range strings.Split(p, "、") {
+			q = strings.TrimSpace(q)
+			if q != "" {
+				out = append(out, q)
+			}
+		}
+	}
+	return out
 }
 
 // getJSON performs a GET and decodes a JSON body, setting extra headers.

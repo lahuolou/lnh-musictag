@@ -6,10 +6,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
-	"os"
-	"path/filepath"
+	"strings"
 	"sync"
 	"time"
+
+	cstore "LNH-musictag/internal/store"
 )
 
 const (
@@ -17,37 +18,51 @@ const (
 	sessionTTL    = 12 * time.Hour
 )
 
-// sessionStore holds active login sessions and the current admin credentials.
+// sessionStore holds active login sessions. The admin credentials live in the
+// SQLite config store (no environment variables), so a Settings change takes
+// effect immediately.
 type sessionStore struct {
-	mu         sync.Mutex
-	sessions   map[string]time.Time // token -> expiry
-	user       string
-	pass       string
-	configFile string // persists the admin password across restarts
+	mu       sync.Mutex
+	sessions map[string]time.Time // token -> expiry
+	cfg      *cstore.Config
+	user     string
 }
 
-func newSessionStore(user, pass, configFile string) *sessionStore {
-	return &sessionStore{sessions: map[string]time.Time{}, user: user, pass: pass, configFile: configFile}
-}
-
-// resolveAdminPassword decides the effective admin password:
-//  1. LNH_ADMIN_PASS env, if set, wins (fixed password).
-//  2. otherwise a previously persisted password from the config file.
-//  3. otherwise a freshly generated random password, persisted to the config
-//     file so it stays stable across restarts. Returns generated=true when new.
-func resolveAdminPassword(envPass, configFile string) (string, bool) {
-	if envPass != "" {
-		return envPass, false
+func newSessionStore(cfg *cstore.Config) *sessionStore {
+	return &sessionStore{
+		sessions: map[string]time.Time{},
+		cfg:      cfg,
+		user:     cfg.GetDefault("admin_user", "admin"),
 	}
-	if pw := loadAdminPassword(configFile); pw != "" {
-		return pw, false
-	}
-	pw := randomPassword(12)
-	_ = saveAdminPassword(configFile, pw) // best effort; startup log will surface it
-	return pw, true
 }
 
-// loginHandler validates credentials and issues a session cookie.
+// bootstrapAdmin ensures an admin account exists in the database. On first run
+// it seeds from optional env vars; otherwise it generates a random password.
+// Returns (user, pass, generated, error).
+func bootstrapAdmin(cfg *cstore.Config, envUser, envPass string) (string, string, bool, error) {
+	if pw, ok := cfg.Get("admin_pass"); ok && pw != "" {
+		return cfg.GetDefault("admin_user", "admin"), pw, false, nil
+	}
+	user := strings.TrimSpace(envUser)
+	if user == "" {
+		user = "admin"
+	}
+	pw := strings.TrimSpace(envPass)
+	generated := false
+	if pw == "" {
+		pw = randomPassword(12)
+		generated = true
+	}
+	if err := cfg.Set("admin_user", user); err != nil {
+		return "", "", false, err
+	}
+	if err := cfg.Set("admin_pass", pw); err != nil {
+		return "", "", false, err
+	}
+	return user, pw, generated, nil
+}
+
+// loginHandler validates credentials (from the DB) and issues a session cookie.
 func (s *sessionStore) loginHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		User string `json:"user"`
@@ -57,8 +72,10 @@ func (s *sessionStore) loginHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	okU := subtle.ConstantTimeCompare([]byte(req.User), []byte(s.user)) == 1
-	okP := subtle.ConstantTimeCompare([]byte(req.Pass), []byte(s.pass)) == 1
+	wantUser, _ := s.cfg.Get("admin_user")
+	wantPass, _ := s.cfg.Get("admin_pass")
+	okU := subtle.ConstantTimeCompare([]byte(req.User), []byte(wantUser)) == 1
+	okP := subtle.ConstantTimeCompare([]byte(req.Pass), []byte(wantPass)) == 1
 	if !(okU && okP) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "账号或密码错误"})
 		return
@@ -72,7 +89,7 @@ func (s *sessionStore) loginHandler(w http.ResponseWriter, r *http.Request) {
 		Name: sessionCookie, Value: token, Path: "/",
 		HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: int(sessionTTL.Seconds()),
 	})
-	writeJSON(w, http.StatusOK, map[string]string{"ok": "已登录", "user": s.user})
+	writeJSON(w, http.StatusOK, map[string]string{"ok": "已登录", "user": wantUser})
 }
 
 // logoutHandler clears the session.
@@ -89,14 +106,14 @@ func (s *sessionStore) logoutHandler(w http.ResponseWriter, r *http.Request) {
 // meHandler reports current auth status (200 authed / 401 not).
 func (s *sessionStore) meHandler(w http.ResponseWriter, r *http.Request) {
 	if s.valid(r) {
-		writeJSON(w, http.StatusOK, map[string]string{"user": s.user})
+		writeJSON(w, http.StatusOK, map[string]string{"user": s.cfg.GetDefault("admin_user", "admin")})
 		return
 	}
 	writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未登录"})
 }
 
 // changePasswordHandler (authenticated) validates the old password and updates
-// the admin password, persisting it to the config file.
+// the admin password in the database.
 func (s *sessionStore) changePasswordHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		OldPass string `json:"oldPass"`
@@ -106,7 +123,8 @@ func (s *sessionStore) changePasswordHandler(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	if subtle.ConstantTimeCompare([]byte(req.OldPass), []byte(s.pass)) != 1 {
+	cur, _ := s.cfg.Get("admin_pass")
+	if subtle.ConstantTimeCompare([]byte(req.OldPass), []byte(cur)) != 1 {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "旧密码错误"})
 		return
 	}
@@ -114,15 +132,8 @@ func (s *sessionStore) changePasswordHandler(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "新密码至少 6 位"})
 		return
 	}
-	if s.configFile == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "未配置密码持久化，无法修改"})
-		return
-	}
-	s.mu.Lock()
-	s.pass = req.NewPass
-	s.mu.Unlock()
-	if err := saveAdminPassword(s.configFile, req.NewPass); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "密码已更新但持久化失败: " + err.Error()})
+	if err := s.cfg.Set("admin_pass", req.NewPass); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "密码更新失败: " + err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "密码已修改"})
@@ -174,33 +185,4 @@ func randomPassword(n int) string {
 		b[i] = chars[int(rb[i])%len(chars)]
 	}
 	return string(b)
-}
-
-type adminConfig struct {
-	Password string `json:"password"`
-}
-
-func loadAdminPassword(file string) string {
-	data, err := os.ReadFile(file)
-	if err != nil {
-		return ""
-	}
-	var cfg adminConfig
-	if json.Unmarshal(data, &cfg) != nil {
-		return ""
-	}
-	return cfg.Password
-}
-
-func saveAdminPassword(file, pw string) error {
-	if dir := filepath.Dir(file); dir != "." {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return err
-		}
-	}
-	data, err := json.Marshal(adminConfig{Password: pw})
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(file, data, 0o600)
 }

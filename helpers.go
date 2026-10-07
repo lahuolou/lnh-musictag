@@ -47,13 +47,17 @@ func fetchBytes(u string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-// stripAudioExt removes a trailing audio file extension (case-insensitive)
-// from a string, e.g. "广岛之恋.mp3" -> "广岛之恋". Non-audio extensions or
-// strings without one are returned unchanged.
+// stripAudioExt removes trailing audio file extensions (case-insensitive),
+// repeatedly, e.g. "广岛之恋.mp3" -> "广岛之恋" and "发如雪.mp3.flac" ->
+// "发如雪". Non-audio extensions or strings without one are returned unchanged.
 func stripAudioExt(s string) string {
-	ext := strings.ToLower(filepath.Ext(s))
-	if ext != "" && model.AudioExts[ext] {
-		return strings.TrimSuffix(s, ext)
+	for {
+		ext := strings.ToLower(filepath.Ext(s))
+		if ext != "" && model.AudioExts[ext] {
+			s = strings.TrimSuffix(s, ext)
+			continue
+		}
+		break
 	}
 	return s
 }

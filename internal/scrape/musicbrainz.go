@@ -119,6 +119,67 @@ func escapeLucene(s string) string {
 	return r.Replace(s)
 }
 
+// ReleaseDetail holds enriched release metadata for album-artist, genres,
+// release date and track numbers.
+type ReleaseDetail struct {
+	Artists []string
+	Genres  []string
+	Date    string
+	Tracks  []ReleaseTrack
+}
+
+// ReleaseTrack is a track within a release.
+type ReleaseTrack struct {
+	Title  string
+	Number string
+}
+
+// ReleaseDetail fetches a release's album-artist, genres, date and track list.
+// Best-effort for metadata completion (genre/year/album artist/track number).
+func (c *Client) ReleaseDetail(mbid string) (*ReleaseDetail, error) {
+	u := fmt.Sprintf("%s/release/%s?inc=artist-credits+genres+recordings&fmt=json",
+		mbBase, url.PathEscape(mbid))
+	body, err := c.get(u)
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Date         string `json:"date"`
+		ArtistCredit []struct {
+			Name string `json:"name"`
+		} `json:"artist-credit"`
+		Genres []struct {
+			Name string `json:"name"`
+		} `json:"genres"`
+		Media []struct {
+			Tracks []struct {
+				Title  string `json:"title"`
+				Number string `json:"number"`
+			} `json:"tracks"`
+		} `json:"media"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, err
+	}
+	rd := &ReleaseDetail{Date: resp.Date}
+	for _, ac := range resp.ArtistCredit {
+		if ac.Name != "" {
+			rd.Artists = append(rd.Artists, ac.Name)
+		}
+	}
+	for _, g := range resp.Genres {
+		if g.Name != "" {
+			rd.Genres = append(rd.Genres, g.Name)
+		}
+	}
+	for _, med := range resp.Media {
+		for _, tr := range med.Tracks {
+			rd.Tracks = append(rd.Tracks, ReleaseTrack{Title: tr.Title, Number: tr.Number})
+		}
+	}
+	return rd, nil
+}
+
 // FetchCover retrieves the front cover for a release as bytes. Returns
 // (nil, nil) if no cover exists.
 func (c *Client) FetchCover(releaseMBID string) ([]byte, error) {

@@ -1,23 +1,27 @@
-// LNH-MusicTag prototype: a self-hosted web app for audio tag editing, library
-// dedup and metadata scraping (MusicBrainz). Built with go.senan.xyz/taglib
-// (WASM TagLib, no CGo) + pure-Go SHA256 dedup + optional fpcalc fingerprint.
+// LNH-MusicTag: a self-hosted web app for audio tag editing, library dedup,
+// metadata scraping (domestic + international sources) and lyrics. Built with
+// go.senan.xyz/taglib (WASM TagLib, no CGo) + pure-Go SHA256 dedup. Config
+// (admin, API keys, options) is stored in SQLite, not environment variables.
 package main
 
 import (
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
 	"LNH-musictag/internal/dedup"
 	"LNH-musictag/internal/model"
 	"LNH-musictag/internal/scrape"
+	cstore "LNH-musictag/internal/store"
 	"LNH-musictag/internal/taglibx"
 )
 
@@ -67,10 +71,96 @@ func (s *store) exists(path string) bool {
 	return ok
 }
 
+func (s *store) remove(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if t, ok := s.tracks[id]; ok {
+		delete(s.tracks, id)
+		delete(s.byPath, t.Path)
+	}
+}
+
+// scanState holds live progress of an asynchronous directory scan.
+type scanState struct {
+	mu      sync.Mutex
+	Running bool   `json:"running"`
+	Dir     string `json:"dir"`
+	Added   int    `json:"added"`
+	Total   int    `json:"total"` // audio files discovered so far
+	Done    int    `json:"done"`
+	Error   string `json:"error"`
+}
+
+// scanStatus is a lock-free snapshot of a scan state, safe to marshal/copy.
+type scanStatus struct {
+	Running bool   `json:"running"`
+	Dir     string `json:"dir"`
+	Added   int    `json:"added"`
+	Total   int    `json:"total"`
+	Done    int    `json:"done"`
+	Error   string `json:"error"`
+}
+
+func (st *scanState) snapshot() scanStatus {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	return scanStatus{
+		Running: st.Running, Dir: st.Dir, Added: st.Added,
+		Total: st.Total, Done: st.Done, Error: st.Error,
+	}
+}
+
+type scanManager struct {
+	mu    sync.Mutex
+	state *scanState
+}
+
+func newScanManager() *scanManager { return &scanManager{} }
+
+func (sm *scanManager) start(store *store, dir string, fp dedup.Fingerprinter, autoFix bool) error {
+	sm.mu.Lock()
+	if sm.state != nil && sm.state.snapshot().Running {
+		sm.mu.Unlock()
+		return errors.New("扫描已在运行")
+	}
+	st := &scanState{Running: true, Dir: dir}
+	sm.state = st
+	sm.mu.Unlock()
+	go func() {
+		added, err := scanDirLive(store, dir, fp, st, autoFix)
+		st.mu.Lock()
+		st.Running = false
+		st.Added = added
+		if err != nil {
+			st.Error = err.Error()
+		}
+		st.mu.Unlock()
+	}()
+	return nil
+}
+
+func (sm *scanManager) status() scanStatus {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if sm.state == nil {
+		return scanStatus{}
+	}
+	return sm.state.snapshot()
+}
+
 func main() {
 	store := newStore()
 	ms := scrape.NewMultiSource()
-	if k := os.Getenv("ACOUSTID_API_KEY"); k != "" {
+	configDir := getenvDefault("LNH_CONFIG_DIR", "/config")
+
+	// Database-backed config: admin + API keys live here, not in env vars.
+	cfg, err := cstore.OpenConfig(configDir)
+	if err != nil {
+		log.Fatalf("open config db: %v", err)
+	}
+	defer cfg.Close()
+
+	if k, ok := cfg.Get("acoustid_key"); ok && k != "" {
 		ms.Client().AcoustIDAPIKey = k
 	}
 
@@ -81,22 +171,20 @@ func main() {
 		log.Println("fingerprint engine (fpcalc) not found; dedup uses SHA256 only")
 	}
 
-	mux := http.NewServeMux()
-
-	// Admin credentials. LNH_ADMIN_PASS set -> fixed; otherwise a random
-	// initial password is generated and persisted to the config dir.
-	adminUser := getenvDefault("LNH_ADMIN_USER", "admin")
-	configDir := getenvDefault("LNH_CONFIG_DIR", "/config")
-	configFile := filepath.Join(configDir, "admin.json")
-	adminPass, generated := resolveAdminPassword(os.Getenv("LNH_ADMIN_PASS"), configFile)
-	sessions := newSessionStore(adminUser, adminPass, configFile)
+	adminUser, adminPass, generated, err := bootstrapAdmin(cfg, os.Getenv("LNH_ADMIN_USER"), os.Getenv("LNH_ADMIN_PASS"))
+	if err != nil {
+		log.Fatalf("init admin: %v", err)
+	}
+	sessions := newSessionStore(cfg)
 	jobs := newJobStore()
+	scans := newScanManager()
+
+	mux := http.NewServeMux()
 
 	mux.HandleFunc("POST /api/login", sessions.loginHandler)
 	mux.HandleFunc("POST /api/logout", sessions.logoutHandler)
 	mux.HandleFunc("GET /api/me", sessions.meHandler)
 
-	// Protected API (requires login)
 	pm := http.NewServeMux()
 	pm.HandleFunc("POST /api/change-password", sessions.changePasswordHandler)
 	pm.HandleFunc("POST /api/scrape/batch", batchScrapeHandler(jobs, store, ms, fingerprinter))
@@ -111,7 +199,7 @@ func main() {
 	dist, _ := fs.Sub(webFS, "web/dist")
 	mux.Handle("/", http.FileServer(http.FS(dist)))
 
-	// Scan a directory
+	// --- Scan (asynchronous, progressive) ---
 	pm.HandleFunc("POST /api/scan", func(w http.ResponseWriter, r *http.Request) {
 		var req struct{ Dir string `json:"dir"` }
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -120,15 +208,65 @@ func main() {
 		}
 		dir := strings.TrimSpace(req.Dir)
 		if dir == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "dir is required"})
+			dir = cfg.GetDefault("scan_dir", "/music")
+		}
+		if st, err := os.Stat(dir); err != nil || !st.IsDir() {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "目录不可访问: " + dir})
 			return
 		}
-		added, err := scanDir(store, dir, fingerprinter)
-		if err != nil {
+		autoFix := cfg.GetDefault("auto_fix_title", "1") == "1"
+		if err := scans.start(store, dir, fingerprinter, autoFix); err != nil {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": "扫描已开始", "dir": dir})
+	})
+	pm.HandleFunc("GET /api/scan/status", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, scans.status())
+	})
+
+	// --- Config / settings (stored in DB) ---
+	pm.HandleFunc("GET /api/settings", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"adminUser":    cfg.GetDefault("admin_user", "admin"),
+			"acoustidKey":  cfg.GetDefault("acoustid_key", ""),
+			"autoFixTitle": cfg.GetDefault("auto_fix_title", "1") == "1",
+			"scanDir":      cfg.GetDefault("scan_dir", "/music"),
+		})
+	})
+	pm.HandleFunc("POST /api/settings", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			AdminUser    *string `json:"adminUser"`
+			AcoustidKey  *string `json:"acoustidKey"`
+			AutoFixTitle *bool   `json:"autoFixTitle"`
+			ScanDir      *string `json:"scanDir"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"added": added, "total": len(store.all())})
+		if req.AdminUser != nil {
+			if u := strings.TrimSpace(*req.AdminUser); u != "" {
+				cfg.Set("admin_user", u)
+			}
+		}
+		if req.AcoustidKey != nil {
+			cfg.Set("acoustid_key", strings.TrimSpace(*req.AcoustidKey))
+			ms.Client().AcoustIDAPIKey = strings.TrimSpace(*req.AcoustidKey)
+		}
+		if req.AutoFixTitle != nil {
+			v := "0"
+			if *req.AutoFixTitle {
+				v = "1"
+			}
+			cfg.Set("auto_fix_title", v)
+		}
+		if req.ScanDir != nil {
+			if d := strings.TrimSpace(*req.ScanDir); d != "" {
+				cfg.Set("scan_dir", d)
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"ok": "已保存"})
 	})
 
 	// List tracks
@@ -191,7 +329,7 @@ func main() {
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "written"})
 	})
 
-	// Embed cover art of a track (JSON body: {"url": "...", "dataBase64": "..."} or clear)
+	// Embed cover art of a track
 	pm.HandleFunc("POST /api/tracks/{id}/cover", func(w http.ResponseWriter, r *http.Request) {
 		t := store.get(r.PathValue("id"))
 		if t == nil {
@@ -237,7 +375,7 @@ func main() {
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "cover written"})
 	})
 
-	// Multi-source metadata search (source defaults to auto)
+	// Multi-source metadata search
 	pm.HandleFunc("GET /api/scrape/search", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query().Get("q")
 		source := r.URL.Query().Get("source")
@@ -253,7 +391,7 @@ func main() {
 		writeJSON(w, http.StatusOK, results)
 	})
 
-	// Fetch lyrics for a track (source optional; auto picks best provider)
+	// Fetch lyrics for a track
 	pm.HandleFunc("GET /api/lyrics", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		sr := scrape.SearchResult{
@@ -291,7 +429,9 @@ func main() {
 			Title       string   `json:"title"`
 			Artists     []string `json:"artists"`
 			Album       string   `json:"album"`
-			AlbumArtist string   `json:"albumArtist"`
+			AlbumArtist []string `json:"albumArtist"`
+			Genre       []string `json:"genre"`
+			TrackNumber int      `json:"trackNumber"`
 			Date        string   `json:"date"`
 			CoverURL    string   `json:"coverURL"`
 			FetchCover  bool     `json:"fetchCover"`
@@ -302,7 +442,7 @@ func main() {
 			return
 		}
 		tags := map[string][]string{}
-		if v := strings.TrimSpace(req.Title); v != "" {
+		if v := stripAudioExt(strings.TrimSpace(req.Title)); v != "" {
 			tags[taglibx.Title] = []string{v}
 		}
 		if len(req.Artists) > 0 {
@@ -311,8 +451,14 @@ func main() {
 		if v := strings.TrimSpace(req.Album); v != "" {
 			tags[taglibx.Album] = []string{v}
 		}
-		if v := strings.TrimSpace(req.AlbumArtist); v != "" {
-			tags[taglibx.AlbumArtist] = []string{v}
+		if len(req.AlbumArtist) > 0 {
+			tags[taglibx.AlbumArtist] = req.AlbumArtist
+		}
+		if len(req.Genre) > 0 {
+			tags[taglibx.Genre] = req.Genre
+		}
+		if req.TrackNumber > 0 {
+			tags[taglibx.TrackNumber] = []string{strconv.Itoa(req.TrackNumber)}
 		}
 		if v := strings.TrimSpace(req.Date); v != "" {
 			tags[taglibx.Date] = []string{v}
@@ -321,12 +467,8 @@ func main() {
 			switch req.Source {
 			case "musicbrainz":
 				tags[taglibx.MBTrackID] = []string{v}
-			case "itunes":
-				tags[taglibx.Comment] = []string{"itunes:" + v}
-			case "netease":
-				tags[taglibx.Comment] = []string{"netease:" + v}
-			case "qq":
-				tags[taglibx.Comment] = []string{"qq:" + v}
+			case "itunes", "netease", "qq", "kugou", "kuwo", "migu", "bilibili", "qishui", "qianqian":
+				tags[taglibx.Comment] = []string{req.Source + ":" + v}
 			}
 		}
 		if v := strings.TrimSpace(req.ReleaseMBID); v != "" {
@@ -357,26 +499,25 @@ func main() {
 	})
 
 	addr := ":10248"
-	log.Printf("LNH-MusicTag prototype listening on http://localhost%s", addr)
-	log.Printf("admin user: %q", adminUser)
+	log.Printf("LNH-MusicTag listening on http://localhost%s", addr)
+	log.Printf("admin user: %q (config stored in %s/lnh.db)", adminUser, configDir)
 	if generated {
-		log.Printf("[首次启动] 已生成随机初始密码并保存到 %s：%s（请登录后在页面“修改密码”，或设置 LNH_ADMIN_PASS 环境变量固定）", configFile, adminPass)
-	} else {
-		log.Printf("admin password: 已配置（来自环境变量或配置文件，不在日志显示）")
+		log.Printf("[首次启动] 已生成随机初始密码并保存到数据库：%s（登录后请在“设置”页修改密码）", adminPass)
 	}
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatal(err)
 	}
 }
 
-// scanDir walks dir, adds audio files to the store and returns how many were
-// added.
-func scanDir(s *store, dir string, fp dedup.Fingerprinter) (int, error) {
-	st, err := os.Stat(dir)
+// scanDirLive walks dir, adding audio files to the store progressively and
+// updating the scan progress. When autoFix is enabled, trailing audio
+// extensions in the title are stripped and written back to the file.
+func scanDirLive(s *store, dir string, fp dedup.Fingerprinter, st *scanState, autoFix bool) (int, error) {
+	st0, err := os.Stat(dir)
 	if err != nil {
 		return 0, fmt.Errorf("cannot access %q: %w", dir, err)
 	}
-	if !st.IsDir() {
+	if !st0.IsDir() {
 		return 0, fmt.Errorf("%q is not a directory", dir)
 	}
 	added := 0
@@ -390,9 +531,27 @@ func scanDir(s *store, dir string, fp dedup.Fingerprinter) (int, error) {
 		if !model.AudioExts[strings.ToLower(filepath.Ext(path))] {
 			return nil
 		}
+		st.mu.Lock()
+		st.Total++
+		st.mu.Unlock()
 		t, terr := taglibx.ReadTrack(path)
 		if terr != nil {
+			st.mu.Lock()
+			st.Done++
+			st.mu.Unlock()
 			return nil
+		}
+		// 默认去后缀：标题含音频扩展名时自动修正并写回文件
+		if autoFix {
+			title := strings.TrimSpace(t.Tags["TITLE"])
+			if title == "" {
+				title = t.FileName
+			}
+			if fixed := stripAudioExt(title); fixed != title {
+				if taglibx.WriteTags(path, map[string][]string{taglibx.Title: {fixed}}, false) == nil {
+					t, _ = taglibx.ReadTrack(path)
+				}
+			}
 		}
 		if fp.Available() {
 			if f, ferr := fp.Fingerprint(path); ferr == nil {
@@ -403,13 +562,23 @@ func scanDir(s *store, dir string, fp dedup.Fingerprinter) (int, error) {
 			added++
 		}
 		s.add(t)
+		st.mu.Lock()
+		st.Added = s.allTracksCount()
+		st.Done++
+		st.mu.Unlock()
 		return nil
 	})
 	return added, err
 }
 
+// allTracksCount returns the current number of tracks in the store.
+func (s *store) allTracksCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.tracks)
+}
+
 // fixTitleHandler strips trailing audio extensions from track titles in batch.
-// Uses the selected ids (or all tracks when ids is empty). Writes TITLE back.
 func fixTitleHandler(s *store, fp dedup.Fingerprinter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {

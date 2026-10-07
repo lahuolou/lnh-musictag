@@ -9,7 +9,11 @@ function toggleAll(ev) {
   const on = ev.target.checked;
   state.tracks.forEach(t => { if (on) state.selected.add(t.id); else state.selected.delete(t.id); });
 }
-function openEdit(t) { state.currentId = t.id; }
+function openEdit(t) {
+  state.currentId = t.id;
+  state.route = '/edit/' + t.id;
+  location.hash = '/edit/' + t.id;
+}
 function fmtDur(sec) {
   if (!sec) return '--';
   const m = Math.floor(sec / 60), s = Math.round(sec % 60);
