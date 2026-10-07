@@ -81,7 +81,8 @@ func GroupByFingerprint(tracks []*model.Track) []model.DuplicateGroup {
 }
 
 func buildGroups(m map[string][]string, method string) []model.DuplicateGroup {
-	var groups []model.DuplicateGroup
+	// Non-nil empty slice so JSON serializes to [] (not null) when no dups.
+	groups := []model.DuplicateGroup{}
 	for key, ids := range m {
 		if len(ids) < 2 {
 			continue

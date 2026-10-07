@@ -6,8 +6,11 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"LNH-musictag/internal/model"
 )
 
 func decodeBase64Raw(s string) ([]byte, error) {
@@ -42,4 +45,15 @@ func fetchBytes(u string) ([]byte, error) {
 		return nil, fmt.Errorf("status %d fetching %s", resp.StatusCode, strings.TrimPrefix(u, "http"))
 	}
 	return io.ReadAll(resp.Body)
+}
+
+// stripAudioExt removes a trailing audio file extension (case-insensitive)
+// from a string, e.g. "广岛之恋.mp3" -> "广岛之恋". Non-audio extensions or
+// strings without one are returned unchanged.
+func stripAudioExt(s string) string {
+	ext := strings.ToLower(filepath.Ext(s))
+	if ext != "" && model.AudioExts[ext] {
+		return strings.TrimSuffix(s, ext)
+	}
+	return s
 }

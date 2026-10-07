@@ -68,9 +68,9 @@ func (s *store) exists(path string) bool {
 
 func main() {
 	store := newStore()
-	scraper := scrape.NewClient()
+	ms := scrape.NewMultiSource()
 	if k := os.Getenv("ACOUSTID_API_KEY"); k != "" {
-		scraper.AcoustIDAPIKey = k
+		ms.Client().AcoustIDAPIKey = k
 	}
 
 	// Optional fingerprint engine (fpcalc from Chromaprint). Noop if absent.
@@ -89,6 +89,7 @@ func main() {
 	configFile := filepath.Join(configDir, "admin.json")
 	adminPass, generated := resolveAdminPassword(os.Getenv("LNH_ADMIN_PASS"), configFile)
 	sessions := newSessionStore(adminUser, adminPass, configFile)
+	jobs := newJobStore()
 
 	mux.HandleFunc("POST /api/login", sessions.loginHandler)
 	mux.HandleFunc("POST /api/logout", sessions.logoutHandler)
@@ -97,6 +98,12 @@ func main() {
 	// Protected API (requires login)
 	pm := http.NewServeMux()
 	pm.HandleFunc("POST /api/change-password", sessions.changePasswordHandler)
+	pm.HandleFunc("POST /api/scrape/batch", batchScrapeHandler(jobs, store, ms, fingerprinter))
+	pm.HandleFunc("GET /api/scrape/jobs/{id}", jobProgressHandler(jobs))
+	pm.HandleFunc("GET /api/scrape/sources", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, ms.Sources())
+	})
+	pm.HandleFunc("POST /api/tracks/fix-title", fixTitleHandler(store, fingerprinter))
 	mux.Handle("/api/", sessions.requireAuth(pm))
 
 	// Static UI (catch-all root; more specific /api/... routes win)
@@ -236,14 +243,15 @@ func main() {
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "cover written"})
 	})
 
-	// MusicBrainz search
+	// Multi-source metadata search (source defaults to auto)
 	pm.HandleFunc("GET /api/scrape/search", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query().Get("q")
+		source := r.URL.Query().Get("source")
 		limit := 8
 		if l := r.URL.Query().Get("limit"); l != "" {
 			fmt.Sscanf(l, "%d", &limit)
 		}
-		results, err := scraper.SearchRecordings(q, limit)
+		results, err := ms.Search(source, q, limit)
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 			return
@@ -251,7 +259,30 @@ func main() {
 		writeJSON(w, http.StatusOK, results)
 	})
 
-	// Scrape a track: write metadata + cover from a chosen recording/release
+	// Fetch lyrics for a track (source optional; auto picks best provider)
+	pm.HandleFunc("GET /api/lyrics", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		sr := scrape.SearchResult{
+			Source:   q.Get("source"),
+			SourceID: q.Get("sourceId"),
+			Title:    q.Get("title"),
+		}
+		if a := q.Get("artists"); a != "" {
+			sr.Artists = strings.Split(a, "||")
+		}
+		if sr.Title == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "title is required"})
+			return
+		}
+		lyric, err := ms.FetchLyrics(sr)
+		if err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"lyric": lyric})
+	})
+
+	// Scrape a track: write metadata + cover from a chosen source result
 	pm.HandleFunc("POST /api/tracks/{id}/scrape", func(w http.ResponseWriter, r *http.Request) {
 		t := store.get(r.PathValue("id"))
 		if t == nil {
@@ -259,15 +290,18 @@ func main() {
 			return
 		}
 		var req struct {
-			Title        string   `json:"title"`
-			Artists      []string `json:"artists"`
-			Album        string   `json:"album"`
-			AlbumArtist  string   `json:"albumArtist"`
-			Date         string   `json:"date"`
-			TrackNumber  string   `json:"trackNumber"`
-			MBID         string   `json:"mbid"`
-			ReleaseMBID  string   `json:"releaseMBID"`
-			FetchCover   bool     `json:"fetchCover"`
+			Source      string   `json:"source"`
+			SourceID    string   `json:"sourceId"`
+			ReleaseMBID string   `json:"releaseMBID"`
+			AlbumID     string   `json:"albumID"`
+			Title       string   `json:"title"`
+			Artists     []string `json:"artists"`
+			Album       string   `json:"album"`
+			AlbumArtist string   `json:"albumArtist"`
+			Date        string   `json:"date"`
+			CoverURL    string   `json:"coverURL"`
+			FetchCover  bool     `json:"fetchCover"`
+			FetchLyrics bool     `json:"fetchLyrics"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -289,21 +323,38 @@ func main() {
 		if v := strings.TrimSpace(req.Date); v != "" {
 			tags[taglibx.Date] = []string{v}
 		}
-		if v := strings.TrimSpace(req.TrackNumber); v != "" {
-			tags[taglibx.TrackNumber] = []string{v}
-		}
-		if v := strings.TrimSpace(req.MBID); v != "" {
-			tags[taglibx.MBTrackID] = []string{v}
+		if v := strings.TrimSpace(req.SourceID); v != "" {
+			switch req.Source {
+			case "musicbrainz":
+				tags[taglibx.MBTrackID] = []string{v}
+			case "itunes":
+				tags[taglibx.Comment] = []string{"itunes:" + v}
+			case "netease":
+				tags[taglibx.Comment] = []string{"netease:" + v}
+			case "qq":
+				tags[taglibx.Comment] = []string{"qq:" + v}
+			}
 		}
 		if v := strings.TrimSpace(req.ReleaseMBID); v != "" {
 			tags[taglibx.MBAlbumID] = []string{v}
+		}
+		if req.FetchLyrics && req.Title != "" {
+			if lyric, err := ms.FetchLyrics(scrape.SearchResult{
+				Source: req.Source, SourceID: req.SourceID,
+				Title: req.Title, Artists: req.Artists,
+			}); err == nil && strings.TrimSpace(lyric) != "" {
+				tags[taglibx.Lyrics] = []string{lyric}
+			}
 		}
 		if err := taglibx.WriteTags(t.Path, tags, false); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		if req.FetchCover && req.ReleaseMBID != "" {
-			if img, err := scraper.FetchCover(req.ReleaseMBID); err == nil && len(img) > 0 {
+		if req.FetchCover {
+			if img, err := ms.FetchCover(scrape.SearchResult{
+				Source: req.Source, ReleaseMBID: req.ReleaseMBID,
+				CoverURL: req.CoverURL, AlbumID: req.AlbumID,
+			}); err == nil && len(img) > 0 {
 				taglibx.WriteCover(t.Path, img)
 			}
 		}
@@ -361,6 +412,59 @@ func scanDir(s *store, dir string, fp dedup.Fingerprinter) (int, error) {
 		return nil
 	})
 	return added, err
+}
+
+// fixTitleHandler strips trailing audio extensions from track titles in batch.
+// Uses the selected ids (or all tracks when ids is empty). Writes TITLE back.
+func fixTitleHandler(s *store, fp dedup.Fingerprinter) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			IDs []string `json:"ids"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		var list []*model.Track
+		if len(req.IDs) == 0 {
+			list = s.all()
+		} else {
+			for _, id := range req.IDs {
+				if t := s.get(id); t != nil {
+					list = append(list, t)
+				}
+			}
+		}
+		type fixRes struct {
+			ID       string `json:"id"`
+			FileName string `json:"fileName"`
+			Fixed    bool   `json:"fixed"`
+			Before   string `json:"before"`
+			After    string `json:"after"`
+		}
+		results := []fixRes{}
+		for _, t := range list {
+			title := strings.TrimSpace(t.Tags["TITLE"])
+			if title == "" {
+				title = t.FileName
+			}
+			fixed := stripAudioExt(title)
+			res := fixRes{ID: t.ID, FileName: t.FileName, Before: title, Fixed: fixed != title}
+			if fixed != title {
+				m := map[string][]string{taglibx.Title: {fixed}}
+				if err := taglibx.WriteTags(t.Path, m, false); err == nil {
+					refreshTrack(s, t.Path, fp)
+					res.After = fixed
+				} else {
+					res.Fixed = false
+					res.After = ""
+					res.Before = "写标签失败: " + err.Error()
+				}
+			}
+			results = append(results, res)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"total": len(results), "fixed": results})
+	}
 }
 
 // refreshTrack re-reads a track's tags/properties after a write.

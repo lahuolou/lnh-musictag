@@ -36,6 +36,7 @@
   .tag{display:inline-block;font-size:11px;padding:2px 7px;border-radius:8px;margin-right:4px}
   .tag.hash{background:#24344a;color:#7fb2ff}
   .tag.fp{background:#3a2f1e;color:#e5b45a}
+  .tag.src{background:#1f3a2f;color:#7fe0a8}
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-top:16px}
   .panel h2{font-size:15px;margin:0 0 12px}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
@@ -54,7 +55,7 @@
   .toast.ok{border-color:var(--ok)}
   .loading{color:var(--muted)}
   .cover-lg{max-width:140px;border-radius:8px}
-  .hidden{display:none}
+  .hidden{display:none !important}
   .login-overlay{position:fixed;inset:0;background:radial-gradient(1200px 600px at 50% -10%,#1b2a44 0%,rgba(8,10,14,.96) 60%);display:flex;align-items:center;justify-content:center;z-index:100}
   .login-box{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:34px 36px;width:360px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
   .login-brand{font-size:44px;text-align:center;margin-bottom:6px}
@@ -71,6 +72,12 @@
   .modal{position:fixed;inset:0;background:rgba(8,10,14,.72);display:flex;align-items:center;justify-content:center;z-index:90}
   .modal-box{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:24px 26px;width:360px}
   .modal-box h2{margin:0 0 16px;font-size:16px}
+  .chk{display:flex;align-items:center;gap:6px;font-size:14px;color:var(--text);cursor:pointer;margin:0}
+  .tchk{width:16px;height:16px;accent-color:var(--accent);cursor:pointer}
+  .progbar{background:var(--panel2);border:1px solid var(--line);border-radius:8px;height:18px;overflow:hidden;margin:10px 0 6px}
+  #progFill{background:linear-gradient(90deg,var(--accent2),var(--accent));height:100%;width:0%;transition:width .4s}
+  #progSummary{font-size:13px}
+  #progSummary .err{color:var(--err);white-space:pre-wrap}
 </style>
 </head>
 <body>
@@ -135,7 +142,7 @@
       <h2>② 曲目列表</h2>
       <div style="max-height:520px;overflow:auto">
         <table>
-          <thead><tr><th>封面</th><th>标题</th><th>艺术家</th><th>专辑</th><th>时长</th><th></th></tr></thead>
+          <thead><tr><th style="width:30px"></th><th>封面</th><th>标题</th><th>艺术家</th><th>专辑</th><th>时长</th><th></th></tr></thead>
           <tbody id="tbody"></tbody>
         </table>
       </div>
@@ -153,6 +160,24 @@
         <button class="ghost sm" onclick="loadDups()">重新检测</button>
         <div id="dupList"></div>
       </div>
+      <div class="panel">
+        <h2>⑤ 批量刮削</h2>
+        <div class="muted" style="margin-bottom:10px">勾选①列表中的曲目（也可全选），自动从 MusicBrainz 刮削并写入标签。</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <label class="chk"><input type="checkbox" id="selAll" onchange="toggleAll(this)"> 全选</label>
+          <label class="chk"><input type="checkbox" id="bFetchCover" checked> 含封面</label>
+          <label class="chk"><input type="checkbox" id="bFetchLyrics"> 含歌词</label>
+          <select id="b_source" style="padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text)"></select>
+          <button id="batchBtn" onclick="startBatch()">刮削选中 (0)</button>
+          <button class="ghost sm" onclick="fixTitle()">修正标题(去后缀)</button>
+          <button class="ghost sm" onclick="clearSel()">清空选择</button>
+        </div>
+        <div id="batchProgress" class="hidden">
+          <div class="progbar"><div id="progFill"></div></div>
+          <div class="muted" id="progText"></div>
+          <div id="progSummary"></div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -161,6 +186,10 @@
 <script>
 const $=id=>document.getElementById(id);
 let tracks=[];
+let selected=new Set();
+let pollTimer=null;
+let sources=[];
+let mbRes=[];
 let current=null;
 let dedupActive=false;
 
@@ -207,8 +236,18 @@ async function logout(){
   showLogin();
 }
 async function init(){
-  try{ await api('/api/me'); hideLogin(); await refresh(); }
+  try{ await api('/api/me'); hideLogin(); }
   catch(e){ showLogin(); }
+  try{ sources=await api('/api/scrape/sources'); }catch(e){ sources=[{name:'auto',label:'自动'},{name:'musicbrainz',label:'MusicBrainz'},{name:'itunes',label:'iTunes'},{name:'netease',label:'网易云'},{name:'qq',label:'QQ音乐'}]; }
+  const sel=selSourceHTML();
+  const b=$('b_source');if(b)b.innerHTML=sel;
+  if(current)openEdit(current);
+  await refresh();
+}
+function selSourceHTML(){
+  let o='';
+  for(const s of sources){o+=`<option value="${esc(s.name)}">${esc(s.label)}</option>`;}
+  return o;
 }
 
 async function scan(){
@@ -237,6 +276,7 @@ function renderTable(){
     tr.style.cursor='pointer';
     tr.onclick=()=>openEdit(t);
     tr.innerHTML=`
+      <td style="text-align:center"><input type="checkbox" class="tchk" data-id="${esc(t.id)}" ${selected.has(t.id)?'checked':''} onclick="event.stopPropagation()" onchange="toggleSel(this)"></td>
       <td><img class="thumb" src="/api/tracks/${encodeURIComponent(t.id)}/cover" onerror="this.style.visibility='hidden'"></td>
       <td>${esc(t.tags.TITLE||t.fileName)}</td>
       <td>${esc((t.tags.ARTIST||'').split(' / ').join(', '))}</td>
@@ -245,6 +285,79 @@ function renderTable(){
       <td>${t.fingerprint?`<span class="tag fp">指纹</span>`:''}</td>`;
     tb.appendChild(tr);
   }
+}
+function toggleSel(cb){
+  const id=cb.dataset.id;
+  if(cb.checked)selected.add(id);else selected.delete(id);
+  updateSelBtn();
+}
+function toggleAll(cb){
+  const on=cb.checked;
+  document.querySelectorAll('.tchk').forEach(c=>{c.checked=on;if(on)selected.add(c.dataset.id);else selected.delete(c.dataset.id);});
+  updateSelBtn();
+}
+function clearSel(){
+  selected.clear();
+  document.querySelectorAll('.tchk').forEach(c=>c.checked=false);
+  const a=$('selAll');if(a)a.checked=false;
+  updateSelBtn();
+}
+function updateSelBtn(){
+  const b=$('batchBtn');if(b)b.textContent='刮削选中 ('+selected.size+')';
+}
+async function startBatch(){
+  if(selected.size===0){toast('请先在列表勾选曲目','err');return;}
+  const fetchCover=$('bFetchCover').checked;
+  const fetchLyrics=$('bFetchLyrics')?$('bFetchLyrics').checked:false;
+  const source=$('b_source')?$('b_source').value:'auto';
+  const btn=$('batchBtn');if(btn)btn.disabled=true;
+  try{
+    const r=await api('/api/scrape/batch',{method:'POST',body:JSON.stringify({ids:[...selected],fetchCover,fetchLyrics,source})});
+    showProgress(r.jobId);
+  }catch(e){
+    toast('批量刮削启动失败: '+e.message,'err');
+    if(btn)btn.disabled=false;
+  }
+}
+function showProgress(jobId){
+  $('batchProgress').classList.remove('hidden');
+  $('progSummary').innerHTML='';
+  const tick=async()=>{
+    try{
+      const j=await api('/api/scrape/jobs/'+encodeURIComponent(jobId));
+      const pct=j.total?Math.round(j.done/j.total*100):0;
+      $('progFill').style.width=pct+'%';
+      if(j.status==='done'){
+        if(pollTimer)clearInterval(pollTimer);pollTimer=null;
+        let ok=0;const fails=[];
+        (j.results||[]).forEach(r=>{if(r.ok)ok++;else if(r.message)fails.push(esc(r.fileName)+': '+esc(r.message));});
+        $('progText').textContent='完成：'+ok+'/'+j.total+' 成功';
+        $('progSummary').innerHTML=fails.length?'<div class="err">失败 '+(j.total-ok)+' 首：\n'+fails.join('\n')+'</div>':'<div class="muted">全部成功</div>';
+        const btn=$('batchBtn');if(btn)btn.disabled=false;
+        clearSel();
+        toast('批量刮削完成','ok');
+        refresh();
+        return;
+      }
+      $('progText').textContent='进度 '+j.done+'/'+j.total+' · '+(j.current||'处理中…');
+      pollTimer=setTimeout(tick,1000);
+    }catch(e){
+      $('progText').textContent='查询进度失败: '+e.message;
+      const btn=$('batchBtn');if(btn)btn.disabled=false;
+    }
+  };
+  tick();
+}
+async function fixTitle(){
+  if(selected.size===0){toast('请先在列表勾选曲目','err');return;}
+  try{
+    const r=await api('/api/tracks/fix-title',{method:'POST',body:JSON.stringify({ids:[...selected]})});
+    const arr=r.fixed||[];
+    const n=arr.filter(x=>x.fixed).length;
+    toast('标题修正完成：'+n+'/'+arr.length+' 首','ok');
+    clearSel();
+    refresh();
+  }catch(e){toast('标题修正失败: '+e.message,'err');}
 }
 function openEdit(t){
   current=t;
@@ -266,12 +379,21 @@ function openEdit(t){
       <label>流派 GENRE</label><input type="text" id="f_genre" value="${esc(t.tags.GENRE||'')}">
       <label>年份 DATE</label><input type="text" id="f_date" value="${esc(t.tags.DATE||'')}">
       <label>曲目号 TRACKNUMBER</label><input type="text" id="f_track" value="${esc(t.tags.TRACKNUMBER||'')}">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:14px">
+        <label style="margin:0">歌词 LYRICS</label>
+        <div class="row" style="gap:6px">
+          <button class="ghost sm" onclick="fetchLyrics()">获取歌词</button>
+          <button class="ghost sm" onclick="clearLyrics()">清除歌词</button>
+        </div>
+      </div>
+      <textarea id="f_lyrics" rows="8" style="width:100%;box-sizing:border-box;resize:vertical;background:var(--panel2);border:1px solid var(--line);border-radius:8px;color:var(--text);padding:8px;font-size:13px;line-height:1.5">${esc(t.tags.LYRICS||'')}</textarea>
       <div class="row" style="margin-top:12px">
         <button class="sm" onclick="saveTags()">保存标签</button>
         <button class="ghost sm" onclick="clearCover()">清除封面</button>
       </div>
-      <label style="margin-top:14px">🔍 MusicBrainz 搜索</label>
+      <label style="margin-top:14px">🔍 刮削搜索（选择来源）</label>
       <div class="row">
+        <select id="s_source" style="padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);min-width:120px">${selSourceHTML()}</select>
         <input type="text" id="s_query" placeholder="自动按标题+艺术家检索，可覆盖" value="${esc((t.tags.TITLE||'')+' '+(t.tags.ARTIST||''))}">
         <button class="sm" onclick="mbSearch()">搜索</button>
       </div>
@@ -285,10 +407,28 @@ async function saveTags(){
     TITLE:$('f_title').value.trim(),ARTIST:$('f_artist').value.trim(),
     ALBUM:$('f_album').value.trim(),ALBUMARTIST:$('f_albumartist').value.trim(),
     GENRE:$('f_genre').value.trim(),DATE:$('f_date').value.trim(),
-    TRACKNUMBER:$('f_track').value.trim()};
+    TRACKNUMBER:$('f_track').value.trim(),
+    LYRICS:$('f_lyrics')?$('f_lyrics').value.trim():''};
   const body={clear:false,tags:Object.fromEntries(Object.entries(tags).filter(([,v])=>v!==''))};
   try{await api('/api/tracks/'+encodeURIComponent(current.id)+'/tags',{method:'POST',body:JSON.stringify(body)});toast('标签已保存','ok');await refresh();openEdit(tracks.find(t=>t.id===current.id)||current);}
   catch(e){toast('保存失败: '+e.message,'err');}
+}
+async function fetchLyrics(){
+  if(!current)return;
+  const el=$('f_lyrics');if(!el)return;
+  const title=$('f_title').value.trim();
+  const artist=$('f_artist').value.trim();
+  if(!title){toast('请先填写标题','err');return;}
+  el.value='获取中…';
+  const artists=artist?artist.split('/').map(s=>s.trim()).filter(Boolean):[];
+  try{
+    const r=await api('/api/lyrics?source=auto&title='+encodeURIComponent(title)+'&artists='+encodeURIComponent(artists.join('||')));
+    el.value=r.lyric||'';
+    if(!r.lyric)toast('未获取到歌词','err');
+  }catch(e){el.value='';toast('获取歌词失败: '+e.message,'err');}
+}
+function clearLyrics(){
+  const el=$('f_lyrics');if(el)el.value='';
 }
 async function clearCover(){
   if(!current)return;
@@ -297,36 +437,46 @@ async function clearCover(){
 }
 async function mbSearch(){
   const q=$('s_query').value.trim();const box=$('mbResults');
-  box.innerHTML='<div class="loading">搜索 MusicBrainz…</div>';
+  const source=$('s_source')?$('s_source').value:'auto';
+  const srcLabel=(sources.find(s=>s.name===source)||{label:source}).label;
+  box.innerHTML='<div class="loading">搜索 '+esc(srcLabel)+'…</div>';
   try{
-    const res=await api('/api/scrape/search?q='+encodeURIComponent(q)+'&limit=8');
+    const res=await api('/api/scrape/search?q='+encodeURIComponent(q)+'&source='+encodeURIComponent(source)+'&limit=8');
     box.innerHTML='';
     if(!res.length){box.innerHTML='<div class="muted">无结果</div>';return;}
-    for(const r of res){
+    mbRes=res;
+    for(let i=0;i<res.length;i++){
+      const r=res[i];
+      const rsrc=(sources.find(s=>s.name===r.source)||{label:r.source}).label;
       const div=document.createElement('div');div.className='res-item';
-      const rel=r.releases&&r.releases[0];
-      const relInfo=rel?esc(rel.title)+' <span class="muted">('+esc(rel.date||'未知年份')+')</span>':'<span class="muted">无专辑</span>';
+      const albumInfo=r.album?esc(r.album)+' <span class="muted">('+esc(r.date||'未知年份')+')</span>':'<span class="muted">无专辑</span>';
+      const cover=r.coverURL||'';
       div.innerHTML=`
-        <div class="t">${esc(r.title)} <span class="muted">${r.artists?esc(r.artists.join(', ')):''}</span></div>
-        <div class="m">${relInfo}</div>
-        <div class="acts">
-          <button class="sm" onclick="applyScrape('${r.mbid}',${r.artists?JSON.stringify(r.artists).replace(/"/g,'&quot;'):'[]'},${rel?JSON.stringify(rel).replace(/"/g,'&quot;'):'null'})">应用(含封面)</button>
-          <button class="ghost sm" onclick="applyScrape('${r.mbid}',${r.artists?JSON.stringify(r.artists).replace(/"/g,'&quot;'):'[]'},null)">仅标签</button>
+        <div class="row" style="gap:10px;align-items:flex-start">
+          ${cover?`<img class="thumb" src="${esc(cover)}" onerror="this.style.visibility='hidden'">`:''}
+          <div style="flex:1;min-width:0">
+            <div class="t"><span class="tag src">${esc(rsrc)}</span> ${esc(r.title)} <span class="muted">${r.artists?esc(r.artists.join(', ')):''}</span></div>
+            <div class="m">${albumInfo}</div>
+            <div class="acts">
+              <button class="sm" onclick="applyScrapeIdx(${i},true)">应用(含封面)</button>
+              <button class="ghost sm" onclick="applyScrapeIdx(${i},false)">仅标签</button>
+            </div>
+          </div>
         </div>`;
       box.appendChild(div);
     }
   }catch(e){box.innerHTML='<div class="muted">搜索失败: '+esc(e.message)+'</div>';}
 }
-async function applyScrape(mbid,artists,rel){
-  if(!current)return;
-  const body={title:$('f_title').value.trim(),artists,mbid,fetchCover:!!rel&&rel.mbid};
-  if(rel){body.album=rel.title;body.date=rel.date;body.releaseMBID=rel.mbid;}
+async function applyScrapeIdx(i,withCover){
+  const r=mbRes[i];
+  if(!r||!current)return;
+  const body={source:r.source,sourceId:r.sourceId,title:r.title,artists:r.artists||[],album:r.album,date:r.date,coverURL:r.coverURL,albumID:r.albumID||'',releaseMBID:r.releaseMBID||'',fetchCover:withCover};
   try{await api('/api/tracks/'+encodeURIComponent(current.id)+'/scrape',{method:'POST',body:JSON.stringify(body)});toast('刮削完成','ok');await refresh();openEdit(tracks.find(t=>t.id===current.id)||current);}
   catch(e){toast('刮削失败: '+e.message,'err');}
 }
 async function loadDups(){
   try{
-    const groups=await api('/api/duplicates');
+    const groups=(await api('/api/duplicates'))||[];
     $('cDup').textContent=groups.length;
     const box=$('dupList');box.innerHTML='';
     dedupActive=groups.some(g=>g.method==='fingerprint');
