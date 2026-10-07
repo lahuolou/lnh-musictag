@@ -1,7 +1,7 @@
 services:
   lnh-musictag:
     build: .
-    image: ghcr.io/lahuolou/lnh-musictag:latest
+    image: lnh-musictag:latest
     container_name: lnh-musictag
     ports:
       - "10248:10248"        # 宿主机 10248 -> 容器 10248（改用非常用端口）

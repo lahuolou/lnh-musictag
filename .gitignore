@@ -33,3 +33,6 @@ go.work.sum
 # 上传/数据
 data/
 uploads/
+# Vue frontend
+web/node_modules/
+web/dist/

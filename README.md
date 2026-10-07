@@ -2,7 +2,9 @@
 
 纯 **Docker 部署**的自托管 Web 音乐标签工具（形态类似 Music Tag Web）：**标签读写 + 歌曲去重 + 多源元数据/歌词刮削 + 批量修正**，全部操作通过浏览器后台完成，无本地 CLI。
 
-技术栈：**go-taglib（go.senan.xyz/taglib，WASM 封装 TagLib v2.1，无 CGo）+ 纯 Go SHA256 去重 + 多刮削源（MusicBrainz / iTunes / 网易云 / QQ音乐）+ 歌词（网易云 / lrclib）**。
+技术栈：**Go 后端（go-taglib WASM 封装 TagLib v2.1，无 CGo）+ 纯 Go SHA256 去重 + 多刮削源（MusicBrainz / iTunes / 网易云 / QQ音乐）+ 歌词（网易云 / lrclib）+ Vue3 前端（多页面：登录 / 主页 / 设置）**。
+
+前端用 **Vue 3 + Vite**（比 React 运行时更轻），构建产物仅约 90KB JS（gzip 34KB），`go:embed` 进单个静态二进制，Docker 多阶段（node 构建前端 → Go 编译 → scratch），运行时无 node/前端依赖、不额外占内存。
 
 ## 核心能力
 
@@ -29,14 +31,11 @@ docker compose up -d --build
 
 浏览器访问 **http://<主机IP>:10248**：
 
-0. **后台登录**：账号默认 `admin`（compose 的 `LNH_ADMIN_USER`）。密码：
-   - `LNH_ADMIN_PASS` **留空** → 首次启动自动生成**随机初始密码**，打印在容器日志（`docker compose logs`），并持久化到配置卷 `/config`（重启不丢失）；登录后点右上角"修改密码"换成自己的。
+0. **登录页**：账号默认 `admin`（compose 的 `LNH_ADMIN_USER`）。密码：
+   - `LNH_ADMIN_PASS` **留空** → 首次启动自动生成**随机初始密码**，打印在容器日志（`docker compose logs`），并持久化到配置卷 `/config`（重启不丢失）。
    - 或直接在 compose 里填 `LNH_ADMIN_PASS=你的密码` 固定。
-1. 输入音频目录的**容器内路径**（如 `/music`）→ 扫描
-2. 点左侧曲目 → 右侧编辑标签；**刮削搜索可选来源**（自动/MusicBrainz/iTunes/网易云/QQ音乐），结果含源徽章+封面，「应用(含封面)」「仅标签」
-3. 右侧下方**歌词 LYRICS**：点「获取歌词」自动抓取（网易云/lrclib）填入，可编辑，「保存标签」写入；「清除歌词」清空
-4. 列表勾选曲目 → ⑤ 批量刮削（选源、勾「含封面」「含歌词」）→ 进度条 + 结果汇总；「修正标题(去后缀)」批量去音频后缀
-5. ④ 重复检测 列出 SHA256 相同的文件组
+1. **主页**：输入音频目录的**容器内路径**（如 `/music`）→ 扫描 → 左侧点曲目编辑/刮削/歌词 → 底部批量
+2. **设置页**：右上角「⚙️ 设置」进入，可**修改密码**（不强制，随时可改/可返回）
 
 路径说明：容器里看到的是挂载后的路径，例如
 - 宿主 `/mnt/sata3-1/mp3` → 容器 `/music`，扫描填 `/music`（compose 默认已挂载此路径）
@@ -52,10 +51,10 @@ docker compose up -d --build
 
 ```
 LNH-musictag/
-  Dockerfile              # 多阶段静态构建（golang:1.27-alpine → scratch）
+  Dockerfile              # 多阶段：node 构建前端 → Go 静态编译 → scratch
   docker-compose.yml      # 端口 10248、音乐卷、环境变量
   .dockerignore
-  main.go                 # HTTP 服务、路由、内存存储、多源 handler
+  main.go                 # HTTP 服务、路由、内存存储、多源 handler、embed dist
   auth.go                 # 登录鉴权、随机初始密码、改密持久化
   helpers.go              # base64 / 远程抓取 / 标题去后缀
   scrapejob.go            # 批量刮削后台任务（进度）
@@ -64,7 +63,16 @@ LNH-musictag/
     taglibx/              # 标签读写封装（go-taglib，含 LYRICS 歌词）
     dedup/                # SHA256 去重 + Fingerprinter 接口
     scrape/               # 多源：sources/itunes/netease/qq/musicbrainz + lyrics
-  web/index.html          # 单页前端（go:embed 内嵌）
+  web/                    # Vue3 + Vite 前端（构建产物 dist 被 go:embed 编译进二进制）
+    src/
+      main.js             # Vue 入口
+      App.vue             # 路由分发：未登录→登录页 / #/settings→设置页 / 其余→主页
+      store.js            # 响应式全局状态 + API 封装
+      api.js              # fetch 封装（401 自动跳登录）
+      views/Login.vue     # 登录页
+      views/Main.vue      # 主页（扫描/曲目列表/编辑刮削/去重/批量）
+      views/Settings.vue  # 设置页（修改密码，可关闭/返回）
+      components/         # TrackTable / EditPanel / DedupPanel / BatchPanel / Toast
 ```
 
 ## 刮削源

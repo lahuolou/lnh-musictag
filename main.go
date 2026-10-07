@@ -7,6 +7,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -20,7 +21,7 @@ import (
 	"LNH-musictag/internal/taglibx"
 )
 
-//go:embed web/index.html
+//go:embed web/dist
 var webFS embed.FS
 
 type store struct {
@@ -106,16 +107,9 @@ func main() {
 	pm.HandleFunc("POST /api/tracks/fix-title", fixTitleHandler(store, fingerprinter))
 	mux.Handle("/api/", sessions.requireAuth(pm))
 
-	// Static UI (catch-all root; more specific /api/... routes win)
-	idx, _ := webFS.ReadFile("web/index.html")
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(idx)
-	})
+	// Static UI (Vue SPA built into web/dist; /api/... routes win over this)
+	dist, _ := fs.Sub(webFS, "web/dist")
+	mux.Handle("/", http.FileServer(http.FS(dist)))
 
 	// Scan a directory
 	pm.HandleFunc("POST /api/scan", func(w http.ResponseWriter, r *http.Request) {
