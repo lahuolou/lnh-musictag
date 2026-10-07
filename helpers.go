@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"LNH-musictag/internal/audiofmt"
 	"LNH-musictag/internal/model"
 )
 
@@ -53,11 +54,39 @@ func fetchBytes(u string) ([]byte, error) {
 func stripAudioExt(s string) string {
 	for {
 		ext := strings.ToLower(filepath.Ext(s))
-		if ext != "" && model.AudioExts[ext] {
+		if ext != "" && (model.AudioExts[ext] || audiofmt.ExtSet[ext]) {
 			s = strings.TrimSuffix(s, ext)
 			continue
 		}
 		break
 	}
 	return s
+}
+
+// renameCleanFile renames an audio file so it keeps only its real extension,
+// determined from the actual encoding (magic bytes), not the current suffix.
+//   - "发如雪.mp3.flac" (real FLAC) -> "发如雪.flac"
+//   - "发如雪.mp3.mp3"   (real MP3)  -> "发如雪.mp3"
+//   - "song.flac" that is really MP3 -> "song.mp3"
+//
+// It returns the (possibly unchanged) new path. Files that are already clean,
+// undetectable, or whose clean target already exists are left untouched.
+func renameCleanFile(path string) (string, error) {
+	base := stripAudioExt(filepath.Base(path))
+	ext := audiofmt.DetectExt(path)
+	if ext == "" {
+		return path, nil
+	}
+	dir := filepath.Dir(path)
+	newPath := filepath.Join(dir, base+ext)
+	if newPath == path {
+		return path, nil
+	}
+	if _, err := os.Stat(newPath); err == nil {
+		return path, fmt.Errorf("目标已存在，跳过重命名: %s", filepath.Base(newPath))
+	}
+	if err := os.Rename(path, newPath); err != nil {
+		return path, err
+	}
+	return newPath, nil
 }

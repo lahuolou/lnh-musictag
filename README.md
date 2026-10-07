@@ -17,7 +17,7 @@
 | ⑤ 补全元数据 | MusicBrainz release 详情回填**专辑艺术家、流派、年代、曲目号**；写入标签 | 批量/单曲刮削均可 |
 | ⑥ 歌词 | 网易云 LRC + lrclib，自动选择 | 单曲获取/编辑/保存，批量「含歌词」 |
 | ⑦ 批量 | 勾选曲目 → 批量刮削（含封面/含歌词/选源）+ 进度条 | 批量页 |
-| ⑧ 去后缀默认执行 | 循环去除末尾音频后缀（`发如雪.mp3.flac → 发如雪`），扫描时默认开启 | 可在设置关闭 |
+| ⑧ 去后缀默认执行 | ① 文件重命名：扫描时按**真实编码格式**（读文件头魔数）去重复/错误音频后缀，`发如雪.mp3.flac → 发如雪.flac`、`发如雪.mp3.mp3 → 发如雪.mp3`；② 标签标题去后缀 `广岛之恋.mp3 → 广岛之恋` | 均默认开启，可在设置关闭 |
 | ⑨ 配置存数据库 | 账号/密码/API Key/选项存 `SQLite`（`/config/lnh.db`），不再用环境变量 | 设置页读写 |
 
 ## 快速开始（Docker）
@@ -64,6 +64,7 @@ LNH-musictag/
   internal/
     model/                # Track / DuplicateGroup
     store/config.go       # SQLite 配置存储（账号/密码/Key/选项）
+    audiofmt/             # 文件头魔数检测真实音频编码格式（文件重命名用）
     taglibx/              # 标签读写封装（go-taglib，含 LYRICS 歌词）
     dedup/                # SHA256 去重 + Fingerprinter 接口
     scrape/               # 11 个源：sources/musicbrainz/itunes/netease/qq/kugou/kuwo/migu/bilibili/qishui/bodian/qianqian + lyrics
@@ -110,7 +111,8 @@ LNH-musictag/
 | GET | `/api/tracks/{id}/cover` | 读内嵌封面 |
 | POST | `/api/tracks/{id}/tags` | `{tags,clear}` 写标签（含 `LYRICS`） |
 | POST | `/api/tracks/{id}/cover` | `{url\|dataBase64\|clear}` 写封面 |
-| POST | `/api/tracks/fix-title` | `{ids}` 批量去音频后缀（默认全部） |
+| POST | `/api/tracks/fix-title` | `{ids}` 批量去音频后缀标题（默认全部） |
+| POST | `/api/rename-files` | `{ids}` 重命名文件：去重复/错误音频后缀（校验真实编码），`发如雪.mp3.flac→发如雪.flac` |
 | GET | `/api/duplicates` | 重复分组（hash + fingerprint） |
 | GET | `/api/settings` | 读取数据库配置（不含密码） |
 | POST | `/api/settings` | 保存配置（账号/Key/选项/目录） |

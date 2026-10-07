@@ -8,7 +8,7 @@ const newPass = ref('')
 const confirm = ref('')
 const msg = ref('')
 
-const cfg = ref({ adminUser: '', acoustidKey: '', autoFixTitle: true, scanDir: '' })
+const cfg = ref({ adminUser: '', acoustidKey: '', autoFixTitle: true, autoRenameFile: true, scanDir: '' })
 const cfgMsg = ref('')
 
 async function doChange() {
@@ -37,6 +37,7 @@ async function saveCfg() {
         adminUser: cfg.value.adminUser,
         acoustidKey: cfg.value.acoustidKey,
         autoFixTitle: cfg.value.autoFixTitle,
+        autoRenameFile: cfg.value.autoRenameFile,
         scanDir: cfg.value.scanDir
       })
     });
@@ -86,7 +87,11 @@ onMounted(loadCfg);
       </div>
       <div class="chk" style="margin:6px 0 14px">
         <input type="checkbox" id="autoFix" class="tchk" v-model="cfg.autoFixTitle" />
-        <label for="autoFix">扫描时默认去除标题后缀（发如雪.mp3 → 发如雪）</label>
+        <label for="autoFix">扫描时默认去除标题后缀（广岛之恋.mp3 → 广岛之恋）</label>
+      </div>
+      <div class="chk" style="margin:0 0 14px">
+        <input type="checkbox" id="autoRename" class="tchk" v-model="cfg.autoRenameFile" />
+        <label for="autoRename">扫描时自动重命名文件：去重复/错误音频后缀（发如雪.mp3.flac → 发如雪.flac，先校验真实编码格式）</label>
       </div>
       <div class="row">
         <button @click="saveCfg">保存配置</button>

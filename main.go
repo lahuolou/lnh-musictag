@@ -80,6 +80,15 @@ func (s *store) remove(id string) {
 	}
 }
 
+func (s *store) removeByPath(p string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if id, ok := s.byPath[p]; ok {
+		delete(s.tracks, id)
+		delete(s.byPath, p)
+	}
+}
+
 // scanState holds live progress of an asynchronous directory scan.
 type scanState struct {
 	mu      sync.Mutex
@@ -117,7 +126,7 @@ type scanManager struct {
 
 func newScanManager() *scanManager { return &scanManager{} }
 
-func (sm *scanManager) start(store *store, dir string, fp dedup.Fingerprinter, autoFix bool) error {
+func (sm *scanManager) start(store *store, dir string, fp dedup.Fingerprinter, autoFix, autoRename bool) error {
 	sm.mu.Lock()
 	if sm.state != nil && sm.state.snapshot().Running {
 		sm.mu.Unlock()
@@ -127,7 +136,7 @@ func (sm *scanManager) start(store *store, dir string, fp dedup.Fingerprinter, a
 	sm.state = st
 	sm.mu.Unlock()
 	go func() {
-		added, err := scanDirLive(store, dir, fp, st, autoFix)
+		added, err := scanDirLive(store, dir, fp, st, autoFix, autoRename)
 		st.mu.Lock()
 		st.Running = false
 		st.Added = added
@@ -193,6 +202,7 @@ func main() {
 		writeJSON(w, http.StatusOK, ms.Sources())
 	})
 	pm.HandleFunc("POST /api/tracks/fix-title", fixTitleHandler(store, fingerprinter))
+	pm.HandleFunc("POST /api/rename-files", renameFilesHandler(store, fingerprinter))
 	mux.Handle("/api/", sessions.requireAuth(pm))
 
 	// Static UI (Vue SPA built into web/dist; /api/... routes win over this)
@@ -215,7 +225,8 @@ func main() {
 			return
 		}
 		autoFix := cfg.GetDefault("auto_fix_title", "1") == "1"
-		if err := scans.start(store, dir, fingerprinter, autoFix); err != nil {
+		autoRename := cfg.GetDefault("auto_rename_file", "1") == "1"
+		if err := scans.start(store, dir, fingerprinter, autoFix, autoRename); err != nil {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 			return
 		}
@@ -228,18 +239,20 @@ func main() {
 	// --- Config / settings (stored in DB) ---
 	pm.HandleFunc("GET /api/settings", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"adminUser":    cfg.GetDefault("admin_user", "admin"),
-			"acoustidKey":  cfg.GetDefault("acoustid_key", ""),
-			"autoFixTitle": cfg.GetDefault("auto_fix_title", "1") == "1",
-			"scanDir":      cfg.GetDefault("scan_dir", "/music"),
+			"adminUser":      cfg.GetDefault("admin_user", "admin"),
+			"acoustidKey":    cfg.GetDefault("acoustid_key", ""),
+			"autoFixTitle":   cfg.GetDefault("auto_fix_title", "1") == "1",
+			"autoRenameFile": cfg.GetDefault("auto_rename_file", "1") == "1",
+			"scanDir":        cfg.GetDefault("scan_dir", "/music"),
 		})
 	})
 	pm.HandleFunc("POST /api/settings", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			AdminUser    *string `json:"adminUser"`
-			AcoustidKey  *string `json:"acoustidKey"`
-			AutoFixTitle *bool   `json:"autoFixTitle"`
-			ScanDir      *string `json:"scanDir"`
+			AdminUser      *string `json:"adminUser"`
+			AcoustidKey    *string `json:"acoustidKey"`
+			AutoFixTitle   *bool   `json:"autoFixTitle"`
+			AutoRenameFile *bool   `json:"autoRenameFile"`
+			ScanDir        *string `json:"scanDir"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -260,6 +273,13 @@ func main() {
 				v = "1"
 			}
 			cfg.Set("auto_fix_title", v)
+		}
+		if req.AutoRenameFile != nil {
+			v := "0"
+			if *req.AutoRenameFile {
+				v = "1"
+			}
+			cfg.Set("auto_rename_file", v)
 		}
 		if req.ScanDir != nil {
 			if d := strings.TrimSpace(*req.ScanDir); d != "" {
@@ -512,7 +532,9 @@ func main() {
 // scanDirLive walks dir, adding audio files to the store progressively and
 // updating the scan progress. When autoFix is enabled, trailing audio
 // extensions in the title are stripped and written back to the file.
-func scanDirLive(s *store, dir string, fp dedup.Fingerprinter, st *scanState, autoFix bool) (int, error) {
+// When autoRename is enabled, files are first renamed to keep only their real
+// encoding extension (detected from the header), e.g. "发如雪.mp3.flac" -> "发如雪.flac".
+func scanDirLive(s *store, dir string, fp dedup.Fingerprinter, st *scanState, autoFix, autoRename bool) (int, error) {
 	st0, err := os.Stat(dir)
 	if err != nil {
 		return 0, fmt.Errorf("cannot access %q: %w", dir, err)
@@ -534,6 +556,16 @@ func scanDirLive(s *store, dir string, fp dedup.Fingerprinter, st *scanState, au
 		st.mu.Lock()
 		st.Total++
 		st.mu.Unlock()
+		// 文件重命名：去重复/错误音频后缀（先校验真实编码格式）
+		if autoRename {
+			oldPath := path
+			if np, rerr := renameCleanFile(path); rerr == nil && np != path {
+				if s.exists(oldPath) {
+					s.removeByPath(oldPath)
+				}
+				path = np
+			}
+		}
 		t, terr := taglibx.ReadTrack(path)
 		if terr != nil {
 			st.mu.Lock()
@@ -645,6 +677,54 @@ func refreshTrack(s *store, path string, fp dedup.Fingerprinter) {
 	s.tracks[t.ID] = t
 	s.byPath[path] = t.ID
 	s.mu.Unlock()
+}
+
+// renameFilesHandler renames selected (or all) tracks so their filename keeps
+// only the real encoding extension, e.g. "发如雪.mp3.flac" -> "发如雪.flac".
+func renameFilesHandler(s *store, fp dedup.Fingerprinter) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			IDs []string `json:"ids"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		var list []*model.Track
+		if len(req.IDs) == 0 {
+			list = s.all()
+		} else {
+			for _, id := range req.IDs {
+				if t := s.get(id); t != nil {
+					list = append(list, t)
+				}
+			}
+		}
+		type res struct {
+			ID      string `json:"id"`
+			Before  string `json:"before"`
+			After   string `json:"after"`
+			Renamed bool   `json:"renamed"`
+			Error   string `json:"error,omitempty"`
+		}
+		results := []res{}
+		for _, t := range list {
+			np, err := renameCleanFile(t.Path)
+			if err != nil {
+				results = append(results, res{ID: t.ID, Before: t.FileName, Renamed: false, Error: err.Error()})
+				continue
+			}
+			if np == t.Path {
+				results = append(results, res{ID: t.ID, Before: t.FileName, Renamed: false})
+				continue
+			}
+			// Re-register the track under its new path (its id derives from path).
+			s.remove(t.ID)
+			refreshTrack(s, np, fp)
+			results = append(results, res{ID: t.ID, Before: t.FileName, After: filepath.Base(np), Renamed: true})
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"total": len(results), "results": results})
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

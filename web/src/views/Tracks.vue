@@ -36,6 +36,17 @@ async function tick() {
 function startPoll() { stopPoll(); poll = setInterval(tick, 800); }
 function stopPoll() { if (poll) { clearInterval(poll); poll = null; } }
 
+async function renameFiles() {
+  const ids = state.selected.size ? [...state.selected] : [];
+  if (!state.tracks.length) { toast('没有曲目', 'err'); return; }
+  try {
+    const res = await api('/api/rename-files', { method: 'POST', body: JSON.stringify({ ids }) });
+    const renamed = res.results ? res.results.filter(r => r.renamed).length : 0;
+    toast('重命名完成：' + renamed + ' 个文件已改名', 'ok');
+    await refresh();
+  } catch (e) { toast('重命名失败: ' + e.message, 'err'); }
+}
+
 onMounted(async () => {
   await loadSources();
   await refresh();
@@ -62,7 +73,10 @@ onBeforeUnmount(stopPoll);
     </div>
 
     <div class="panel">
-      <h2>曲目列表</h2>
+      <div class="row" style="justify-content:space-between">
+        <h2 style="margin:0">曲目列表</h2>
+        <button class="ghost sm" @click="renameFiles" :disabled="state.scanStatus.running">重命名文件(去多后缀)</button>
+      </div>
       <div style="max-height:520px;overflow:auto"><TrackTable /></div>
     </div>
   </div>
