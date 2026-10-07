@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LNH-MusicTag</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --line:#2a2f3a;
+    --text:#e6e8ee; --muted:#8b93a3; --accent:#4f8cff; --accent2:#2f6fe0;
+    --ok:#35c46a; --warn:#e5a63b; --err:#e05252;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text)}
+  header{padding:16px 24px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--panel)}
+  header h1{font-size:18px;margin:0;font-weight:600}
+  .badge{font-size:12px;color:var(--muted);background:var(--panel2);padding:2px 8px;border-radius:10px}
+  .wrap{max-width:1200px;margin:0 auto;padding:20px 24px}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  input[type=text],select{background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:8px 10px;border-radius:8px;font-size:14px;flex:1;min-width:200px}
+  button{background:var(--accent2);border:none;color:#fff;padding:8px 14px;border-radius:8px;font-size:14px;cursor:pointer;white-space:nowrap}
+  button:hover{background:var(--accent)}
+  button.ghost{background:var(--panel2);border:1px solid var(--line);color:var(--text)}
+  button.sm{padding:4px 10px;font-size:13px}
+  button.danger{background:#7a2d2d}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:16px 0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .card .num{font-size:26px;font-weight:700}
+  .card .lab{color:var(--muted);font-size:13px;margin-top:4px}
+  table{width:100%;border-collapse:collapse;background:var(--panel);border-radius:12px;overflow:hidden;font-size:14px}
+  th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line)}
+  th{background:var(--panel2);color:var(--muted);font-weight:600;position:sticky;top:0}
+  tr:hover td{background:#20242e}
+  .thumb{width:40px;height:40px;border-radius:6px;object-fit:cover;background:var(--panel2)}
+  .muted{color:var(--muted)}
+  .tag{display:inline-block;font-size:11px;padding:2px 7px;border-radius:8px;margin-right:4px}
+  .tag.hash{background:#24344a;color:#7fb2ff}
+  .tag.fp{background:#3a2f1e;color:#e5b45a}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-top:16px}
+  .panel h2{font-size:15px;margin:0 0 12px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:900px){.grid2{grid-template-columns:1fr}}
+  label{display:block;font-size:12px;color:var(--muted);margin:8px 0 4px}
+  .form input[type=text]{width:100%}
+  .res-item{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:var(--panel2)}
+  .res-item .t{font-weight:600}
+  .res-item .m{color:var(--muted);font-size:13px;margin-top:2px}
+  .res-item .acts{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+  .dup{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
+  .dup:last-child{border-bottom:none}
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#22272f;border:1px solid var(--line);padding:10px 16px;border-radius:10px;font-size:14px;display:none;z-index:50}
+  .toast.show{display:block}
+  .toast.err{border-color:var(--err)}
+  .toast.ok{border-color:var(--ok)}
+  .loading{color:var(--muted)}
+  .cover-lg{max-width:140px;border-radius:8px}
+  .hidden{display:none}
+  .login-overlay{position:fixed;inset:0;background:radial-gradient(1200px 600px at 50% -10%,#1b2a44 0%,rgba(8,10,14,.96) 60%);display:flex;align-items:center;justify-content:center;z-index:100}
+  .login-box{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:34px 36px;width:360px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+  .login-brand{font-size:44px;text-align:center;margin-bottom:6px}
+  .login-box h2{margin:0 0 4px;font-size:20px;text-align:center}
+  .login-sub{color:var(--muted);font-size:13px;margin:0 0 22px;text-align:center}
+  .field{margin-bottom:16px}
+  .field label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+  .field input{width:100%;min-width:0;padding:10px 12px}
+  .pw-row{display:flex;gap:8px}
+  .pw-row input{flex:1;min-width:0}
+  .pw-row button{flex:0 0 auto;min-width:0}
+  .login-btn{width:100%;margin-top:4px;padding:11px;font-size:15px;border-radius:9px}
+  .login-msg{text-align:center;margin-top:12px;min-height:18px}
+  .modal{position:fixed;inset:0;background:rgba(8,10,14,.72);display:flex;align-items:center;justify-content:center;z-index:90}
+  .modal-box{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:24px 26px;width:360px}
+  .modal-box h2{margin:0 0 16px;font-size:16px}
+</style>
+</head>
+<body>
+<header>
+  <h1>🎵 LNH-MusicTag</h1>
+  <span class="badge">Go + go-taglib(WASM) + MusicBrainz</span>
+  <span class="badge" id="fpBadge">指纹: 未启用</span>
+  <button class="ghost sm hidden" id="pwBtn" onclick="openPwModal()">修改密码</button>
+  <button class="ghost sm hidden" id="logoutBtn" onclick="logout()">退出</button>
+</header>
+<div class="login-overlay" id="loginOverlay">
+  <div class="login-box">
+    <div class="login-brand">🎵</div>
+    <h2>LNH-MusicTag</h2>
+    <p class="login-sub">登录后台管理音乐库</p>
+    <div class="field">
+      <label>账号</label>
+      <input type="text" id="l_user" autocomplete="username" value="admin">
+    </div>
+    <div class="field">
+      <label>密码</label>
+      <div class="pw-row">
+        <input type="password" id="l_pass" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
+        <button class="ghost sm" type="button" onclick="togglePw()" title="显示/隐藏">👁</button>
+      </div>
+    </div>
+    <button class="login-btn" onclick="doLogin()">登录</button>
+    <div class="loading login-msg" id="loginMsg"></div>
+  </div>
+</div>
+<div class="modal hidden" id="pwModal">
+  <div class="modal-box">
+    <h2>修改密码</h2>
+    <div class="field"><label>旧密码</label><input type="password" id="c_old" autocomplete="current-password"></div>
+    <div class="field"><label>新密码（至少 6 位）</label><input type="password" id="c_new" autocomplete="new-password"></div>
+    <div class="field"><label>确认新密码</label><input type="password" id="c_confirm" autocomplete="new-password" onkeydown="if(event.key==='Enter')doChangePw()"></div>
+    <div class="row" style="margin-top:8px">
+      <button class="ghost" style="flex:1" onclick="closePwModal()">取消</button>
+      <button style="flex:1" onclick="doChangePw()">确认修改</button>
+    </div>
+    <div class="loading login-msg" id="pwMsg"></div>
+  </div>
+</div>
+<div class="wrap">
+  <div class="cards">
+    <div class="card"><div class="num" id="cTracks">0</div><div class="lab">曲目</div></div>
+    <div class="card"><div class="num" id="cDup">0</div><div class="lab">重复分组</div></div>
+    <div class="card"><div class="num" id="cSize">0</div><div class="lab">总时长(分钟)</div></div>
+  </div>
+
+  <div class="panel">
+    <h2>① 扫描目录</h2>
+    <div class="row">
+      <input type="text" id="scanDir" placeholder="输入容器内音频目录，如 /music" value="/music">
+      <button onclick="scan()">扫描</button>
+    </div>
+    <div class="loading" id="scanMsg"></div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel">
+      <h2>② 曲目列表</h2>
+      <div style="max-height:520px;overflow:auto">
+        <table>
+          <thead><tr><th>封面</th><th>标题</th><th>艺术家</th><th>专辑</th><th>时长</th><th></th></tr></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h2>③ 编辑 / 刮削</h2>
+        <div id="editArea">
+          <div class="muted">点击左侧某一行曲目，在此编辑标签或从 MusicBrainz 刮削。</div>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>④ 重复检测</h2>
+        <button class="ghost sm" onclick="loadDups()">重新检测</button>
+        <div id="dupList"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $=id=>document.getElementById(id);
+let tracks=[];
+let current=null;
+let dedupActive=false;
+
+async function api(path,opts={}){
+  const r=await fetch(path,Object.assign({headers:{'Content-Type':'application/json'}},opts));
+  if(r.status===401 && !/\/login|\/me$/.test(path)){ showLogin(); throw new Error('未登录或会话过期'); }
+  const data=await r.json().catch(()=>null);
+  if(!r.ok){throw new Error((data&&data.error)||('HTTP '+r.status));}
+  return data;
+}
+function toast(msg,type=''){
+  const t=$('toast');t.textContent=msg;t.className='toast show '+type;
+  clearTimeout(t._tm);t._tm=setTimeout(()=>t.className='toast',2600);
+}
+function fmtDur(sec){if(!sec)return '--';const m=Math.floor(sec/60);const s=Math.round(sec%60);return m+':'+String(s).padStart(2,'0');}
+function esc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+function showLogin(){ $('loginOverlay').style.display='flex'; $('logoutBtn').classList.add('hidden'); $('pwBtn').classList.add('hidden'); }
+function hideLogin(){ $('loginOverlay').style.display='none'; $('logoutBtn').classList.remove('hidden'); $('pwBtn').classList.remove('hidden'); }
+function togglePw(){ const p=$('l_pass'); p.type = p.type==='password'?'text':'password'; }
+function openPwModal(){ $('pwModal').classList.remove('hidden'); $('c_old').focus(); }
+function closePwModal(){ $('pwModal').classList.add('hidden'); $('pwMsg').textContent=''; $('c_old').value=$('c_new').value=$('c_confirm').value=''; }
+async function doChangePw(){
+  const old=$('c_old').value, nw=$('c_new').value, cf=$('c_confirm').value;
+  $('pwMsg').textContent='';
+  if(nw!==cf){ $('pwMsg').textContent='两次输入的新密码不一致'; return; }
+  if(nw.length<6){ $('pwMsg').textContent='新密码至少 6 位'; return; }
+  try{
+    await api('/api/change-password',{method:'POST',body:JSON.stringify({oldPass:old,newPass:nw})});
+    toast('密码已修改','ok'); closePwModal();
+  }catch(e){ $('pwMsg').textContent=e.message; }
+}
+async function doLogin(){
+  const user=$('l_user').value.trim(), pass=$('l_pass').value;
+  if(!user||!pass){ $('loginMsg').textContent='请输入账号和密码'; return; }
+  $('loginMsg').textContent='登录中…';
+  try{
+    await api('/api/login',{method:'POST',body:JSON.stringify({user,pass})});
+    hideLogin(); toast('登录成功','ok'); await refresh();
+  }catch(e){ $('loginMsg').textContent=e.message; }
+}
+async function logout(){
+  try{ await api('/api/logout',{method:'POST'}); }catch(e){}
+  showLogin();
+}
+async function init(){
+  try{ await api('/api/me'); hideLogin(); await refresh(); }
+  catch(e){ showLogin(); }
+}
+
+async function scan(){
+  const dir=$('scanDir').value.trim();
+  if(!dir){toast('请输入目录路径','err');return;}
+  $('scanMsg').textContent='扫描中…';
+  try{
+    const r=await api('/api/scan',{method:'POST',body:JSON.stringify({dir})});
+    toast('新增 '+r.added+' 首，共 '+r.total+' 首','ok');
+    await refresh();
+  }catch(e){toast('扫描失败: '+e.message,'err');}
+  $('scanMsg').textContent='';
+}
+async function refresh(){
+  tracks=await api('/api/tracks');
+  $('cTracks').textContent=tracks.length;
+  let dur=0;for(const t of tracks){dur+=t.duration||0;}
+  $('cSize').textContent=Math.round(dur/60);
+  renderTable();
+  await loadDups();
+}
+function renderTable(){
+  const tb=$('tbody');tb.innerHTML='';
+  for(const t of tracks){
+    const tr=document.createElement('tr');
+    tr.style.cursor='pointer';
+    tr.onclick=()=>openEdit(t);
+    tr.innerHTML=`
+      <td><img class="thumb" src="/api/tracks/${encodeURIComponent(t.id)}/cover" onerror="this.style.visibility='hidden'"></td>
+      <td>${esc(t.tags.TITLE||t.fileName)}</td>
+      <td>${esc((t.tags.ARTIST||'').split(' / ').join(', '))}</td>
+      <td>${esc(t.tags.ALBUM||'')}</td>
+      <td class="muted">${fmtDur(t.duration)}</td>
+      <td>${t.fingerprint?`<span class="tag fp">指纹</span>`:''}</td>`;
+    tb.appendChild(tr);
+  }
+}
+function openEdit(t){
+  current=t;
+  const cover=`/api/tracks/${encodeURIComponent(t.id)}/cover`;
+  $('editArea').innerHTML=`
+    <div class="row" style="margin-bottom:10px">
+      <img class="cover-lg" src="${cover}" onerror="this.style.visibility='hidden'">
+      <div>
+        <div style="font-weight:600">${esc(t.tags.TITLE||t.fileName)}</div>
+        <div class="muted" style="font-size:13px">${esc(t.path)}</div>
+        <div class="muted" style="font-size:12px">SHA256: ${t.sha256.slice(0,20)}…</div>
+      </div>
+    </div>
+    <div class="form">
+      <label>标题 TITLE</label><input type="text" id="f_title" value="${esc(t.tags.TITLE||'')}">
+      <label>艺术家 ARTIST</label><input type="text" id="f_artist" value="${esc(t.tags.ARTIST||'')}">
+      <label>专辑 ALBUM</label><input type="text" id="f_album" value="${esc(t.tags.ALBUM||'')}">
+      <label>专辑艺术家 ALBUMARTIST</label><input type="text" id="f_albumartist" value="${esc(t.tags.ALBUMARTIST||'')}">
+      <label>流派 GENRE</label><input type="text" id="f_genre" value="${esc(t.tags.GENRE||'')}">
+      <label>年份 DATE</label><input type="text" id="f_date" value="${esc(t.tags.DATE||'')}">
+      <label>曲目号 TRACKNUMBER</label><input type="text" id="f_track" value="${esc(t.tags.TRACKNUMBER||'')}">
+      <div class="row" style="margin-top:12px">
+        <button class="sm" onclick="saveTags()">保存标签</button>
+        <button class="ghost sm" onclick="clearCover()">清除封面</button>
+      </div>
+      <label style="margin-top:14px">🔍 MusicBrainz 搜索</label>
+      <div class="row">
+        <input type="text" id="s_query" placeholder="自动按标题+艺术家检索，可覆盖" value="${esc((t.tags.TITLE||'')+' '+(t.tags.ARTIST||''))}">
+        <button class="sm" onclick="mbSearch()">搜索</button>
+      </div>
+      <div id="mbResults"></div>
+    </div>`;
+  $('editArea').scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+async function saveTags(){
+  if(!current)return;
+  const tags={
+    TITLE:$('f_title').value.trim(),ARTIST:$('f_artist').value.trim(),
+    ALBUM:$('f_album').value.trim(),ALBUMARTIST:$('f_albumartist').value.trim(),
+    GENRE:$('f_genre').value.trim(),DATE:$('f_date').value.trim(),
+    TRACKNUMBER:$('f_track').value.trim()};
+  const body={clear:false,tags:Object.fromEntries(Object.entries(tags).filter(([,v])=>v!==''))};
+  try{await api('/api/tracks/'+encodeURIComponent(current.id)+'/tags',{method:'POST',body:JSON.stringify(body)});toast('标签已保存','ok');await refresh();openEdit(tracks.find(t=>t.id===current.id)||current);}
+  catch(e){toast('保存失败: '+e.message,'err');}
+}
+async function clearCover(){
+  if(!current)return;
+  try{await api('/api/tracks/'+encodeURIComponent(current.id)+'/cover',{method:'POST',body:JSON.stringify({clear:true})});toast('封面已清除','ok');await refresh();openEdit(tracks.find(t=>t.id===current.id)||current);}
+  catch(e){toast('失败: '+e.message,'err');}
+}
+async function mbSearch(){
+  const q=$('s_query').value.trim();const box=$('mbResults');
+  box.innerHTML='<div class="loading">搜索 MusicBrainz…</div>';
+  try{
+    const res=await api('/api/scrape/search?q='+encodeURIComponent(q)+'&limit=8');
+    box.innerHTML='';
+    if(!res.length){box.innerHTML='<div class="muted">无结果</div>';return;}
+    for(const r of res){
+      const div=document.createElement('div');div.className='res-item';
+      const rel=r.releases&&r.releases[0];
+      const relInfo=rel?esc(rel.title)+' <span class="muted">('+esc(rel.date||'未知年份')+')</span>':'<span class="muted">无专辑</span>';
+      div.innerHTML=`
+        <div class="t">${esc(r.title)} <span class="muted">${r.artists?esc(r.artists.join(', ')):''}</span></div>
+        <div class="m">${relInfo}</div>
+        <div class="acts">
+          <button class="sm" onclick="applyScrape('${r.mbid}',${r.artists?JSON.stringify(r.artists).replace(/"/g,'&quot;'):'[]'},${rel?JSON.stringify(rel).replace(/"/g,'&quot;'):'null'})">应用(含封面)</button>
+          <button class="ghost sm" onclick="applyScrape('${r.mbid}',${r.artists?JSON.stringify(r.artists).replace(/"/g,'&quot;'):'[]'},null)">仅标签</button>
+        </div>`;
+      box.appendChild(div);
+    }
+  }catch(e){box.innerHTML='<div class="muted">搜索失败: '+esc(e.message)+'</div>';}
+}
+async function applyScrape(mbid,artists,rel){
+  if(!current)return;
+  const body={title:$('f_title').value.trim(),artists,mbid,fetchCover:!!rel&&rel.mbid};
+  if(rel){body.album=rel.title;body.date=rel.date;body.releaseMBID=rel.mbid;}
+  try{await api('/api/tracks/'+encodeURIComponent(current.id)+'/scrape',{method:'POST',body:JSON.stringify(body)});toast('刮削完成','ok');await refresh();openEdit(tracks.find(t=>t.id===current.id)||current);}
+  catch(e){toast('刮削失败: '+e.message,'err');}
+}
+async function loadDups(){
+  try{
+    const groups=await api('/api/duplicates');
+    $('cDup').textContent=groups.length;
+    const box=$('dupList');box.innerHTML='';
+    dedupActive=groups.some(g=>g.method==='fingerprint');
+    $('fpBadge').textContent='指纹: '+(dedupActive?'已启用':'未启用');
+    if(!groups.length){box.innerHTML='<div class="muted">未发现重复。</div>';return;}
+    for(const g of groups){
+      const members=g.ids.map(id=>tracks.find(t=>t.id===id)).filter(Boolean);
+      const div=document.createElement('div');div.className='dup';
+      div.innerHTML=`
+        <span class="tag ${g.method==='hash'?'hash':'fp'}">${g.method==='hash'?'SHA256':'指纹'}</span>
+        <span><b>${g.count}</b> 首 · ${members.map(m=>esc(m.fileName)).join(' / ')}</span>`;
+      box.appendChild(div);
+    }
+  }catch(e){$('dupList').innerHTML='<div class="muted">检测失败: '+esc(e.message)+'</div>';}
+}
+window.addEventListener('keydown',e=>{if(e.key==='Enter'){const el=document.activeElement;if(el&&el.id==='scanDir')scan();if(el&&el.id==='s_query')mbSearch();}});
+init();
+</script>
+</body>
+</html>

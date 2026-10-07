@@ -1,0 +1,6 @@
+server.*.log
+*.log
+.git
+.idea
+.vscode
+README.md

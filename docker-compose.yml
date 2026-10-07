@@ -1,0 +1,24 @@
+services:
+  lnh-musictag:
+    build: .
+    image: lnh-musictag:latest
+    container_name: lnh-musictag
+    ports:
+      - "10248:10248"        # 宿主机 10248 -> 容器 10248（改用非常用端口）
+    volumes:
+      # 默认音乐目录（NAS 路径）。应用会把标签/封面写回文件，所以必须可读写，别改成 :ro
+      - /mnt/sata3-1/mp3:/music
+      # 配置卷：持久化后台初始/修改后的密码（admin.json），重启不丢失
+      - lnh_config:/config
+    environment:
+      # 后台账号
+      - LNH_ADMIN_USER=admin
+      # 密码：留空则首次启动自动生成随机初始密码，打印在容器日志并保存到 /config，
+      #       登录后可在页面“修改密码”。也可在此填固定密码（如 LNH_ADMIN_PASS=mypass）
+      - LNH_ADMIN_PASS=
+      # 可选：启用 AcoustID 录音识别（需注册 key，见 README）
+      - ACOUSTID_API_KEY=
+    restart: unless-stopped
+
+volumes:
+  lnh_config:
