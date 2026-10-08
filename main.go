@@ -308,6 +308,30 @@ func main() {
 		writeJSON(w, http.StatusOK, groups)
 	})
 
+	// Remove selected duplicate files (user-choose which to keep first)
+	pm.HandleFunc("POST /api/duplicates/remove", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ IDs []string `json:"ids"` }
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		removed := 0
+		failed := []string{}
+		for _, id := range req.IDs {
+			t := store.get(id)
+			if t == nil {
+				continue
+			}
+			if err := os.Remove(t.Path); err != nil {
+				failed = append(failed, t.FileName)
+				continue
+			}
+			store.remove(id)
+			removed++
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"removed": removed, "failed": failed})
+	})
+
 	// Serve embedded cover art of a track
 	pm.HandleFunc("GET /api/tracks/{id}/cover", func(w http.ResponseWriter, r *http.Request) {
 		t := store.get(r.PathValue("id"))

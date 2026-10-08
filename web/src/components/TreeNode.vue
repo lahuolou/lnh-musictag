@@ -11,6 +11,9 @@ const props = defineProps({
   artists: Function,
   folderCount: Function
 })
+function trackName(t) {
+  return (t.fileName || '').replace(/\.(mp3|flac|m4a|aac|ogg|opus|wav|wma|ape|mpc|aiff|mka)$/i, '');
+}
 </script>
 
 <template>
@@ -30,7 +33,7 @@ const props = defineProps({
     <template v-else>
       <span class="tog"></span>
       <input type="checkbox" class="tchk" :checked="selected.has(node.track.id)" @change="toggleSel(node.track, $event)" />
-      <span class="tt" :title="node.track.path" @click="openTrack(node.track)">{{ node.track.tags.TITLE || node.name }}</span>
+      <span class="tt" :title="node.track.path" @click="openTrack(node.track)">{{ trackName(node.track) }}</span>
       <span class="muted ar">{{ artists(node.track) }}</span>
     </template>
   </div>
