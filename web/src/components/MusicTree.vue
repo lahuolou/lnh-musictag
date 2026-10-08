@@ -96,11 +96,11 @@ function setSort(k) {
 function sortIcon(k) { return sortKey.value === k ? (sortDir.value === 1 ? '▲' : '▼') : ''; }
 
 // 分页渲染：大曲库不卡（滚动到底自动加载更多）
-const shown = computed(() => sorted().slice(0, visible.value));
+const shown = computed(() => sorted.value.slice(0, visible.value));
 watch([q, filter, sortKey, sortDir], () => { visible.value = pageSize; });
 function onScroll(e) {
   const el = e.target;
-  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 200 && visible.value < sorted().length) {
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 200 && visible.value < sorted.value.length) {
     visible.value += pageSize;
   }
 }
@@ -232,8 +232,8 @@ onBeforeUnmount(stopPoll);
           </tr>
         </tbody>
       </table>
-      <div v-if="visible < sorted().length" class="muted" style="padding:8px;text-align:center;font-size:12px">
-        已显示 {{ shown.length }} / {{ sorted().length }} 首，继续滚动加载更多…
+      <div v-if="visible < sorted.length" class="muted" style="padding:8px;text-align:center;font-size:12px">
+        已显示 {{ shown.length }} / {{ sorted.length }} 首，继续滚动加载更多…
       </div>
     </div>
   </div>

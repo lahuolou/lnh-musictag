@@ -39,6 +39,7 @@ onMounted(async () => {
       <span class="spacer"></span>
       <span class="badge">曲目 {{ state.tracks.length }}</span>
       <button class="navlink" :title="theme === 'dark' ? '切换到白天模式' : '切换到黑夜模式'" @click="toggleTheme">{{ theme === 'dark' ? '🌙' : '☀️' }}</button>
+      <button class="ghost sm" :class="{ on: state.activeTab !== 'settings' }" @click="tab('list')">列表</button>
       <button class="ghost sm" :class="{ on: state.activeTab === 'settings' }" @click="tab('settings')">设置</button>
       <button class="ghost sm" @click="logout">退出</button>
     </nav>
