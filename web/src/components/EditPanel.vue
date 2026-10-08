@@ -80,6 +80,27 @@ async function getLyrics() {
 }
 function clearLyrics() { f.value.lyrics = ''; }
 
+function fmtSize(s) {
+  if (!s) return '';
+  const mb = s / 1048576;
+  return mb >= 1024 ? (mb / 1024).toFixed(1) + ' GB' : mb.toFixed(1) + ' MB';
+}
+function fmtDur(d) {
+  if (!d) return '';
+  const m = Math.floor(d / 60), s = Math.floor(d % 60);
+  return m + ':' + String(s).padStart(2, '0');
+}
+
+// 导入同目录外挂 .lrc 歌词到标签
+async function importLrc() {
+  if (!cur()) return;
+  try {
+    const r = await api('/api/tracks/' + encodeURIComponent(state.currentId) + '/lrcfile');
+    f.value.lyrics = r.content || '';
+    toast('已导入外挂歌词：' + r.name, 'ok');
+  } catch (e) { toast('读取外挂歌词失败: ' + e.message, 'err'); }
+}
+
 async function clearCover() {
   if (!cur()) return;
   try {
@@ -130,7 +151,9 @@ const t = cur;
       <div>
         <div style="font-weight:600">{{ t().tags.TITLE || t().fileName }}</div>
         <div class="muted" style="font-size:13px">{{ t().path }}</div>
-        <div class="muted" style="font-size:12px">SHA256: {{ t().sha256.slice(0, 20) }}…</div>
+        <div class="muted" style="font-size:12px">
+          {{ fmtSize(t().size) }} · {{ fmtDur(t().duration) }} · {{ t().bitrate || '?' }} kbps · {{ t().sampleRate ? (t().sampleRate / 1000).toFixed(1) + ' kHz' : '' }} · SHA256: {{ t().sha256.slice(0, 20) }}…
+        </div>
       </div>
     </div>
     <label>标题 TITLE</label><input type="text" v-model="f.title" />
@@ -144,6 +167,7 @@ const t = cur;
     <div style="display:flex;align-items:center;justify-content:space-between;margin-top:14px">
       <label style="margin:0">歌词 LYRICS</label>
       <div class="row" style="gap:6px">
+        <button v-if="t().hasLrcFile" class="ghost sm" @click="importLrc" title="读取同目录 .lrc 文件内容">导入外挂 LRC</button>
         <button class="ghost sm" @click="getLyrics">获取歌词</button>
         <button class="ghost sm" @click="clearLyrics">清除歌词</button>
       </div>

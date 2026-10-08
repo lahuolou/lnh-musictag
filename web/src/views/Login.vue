@@ -7,16 +7,20 @@ const user = ref('admin')
 const pass = ref('')
 const msg = ref('')
 const showPw = ref(false)
+const busy = ref(false)
 
 async function doLogin() {
+  if (busy.value) return;
   msg.value = '';
   if (!user.value.trim() || !pass.value) { msg.value = '请输入账号和密码'; return; }
+  busy.value = true;
   msg.value = '登录中…';
   try {
     await api('/api/login', { method: 'POST', body: JSON.stringify({ user: user.value.trim(), pass: pass.value }) });
     state.authed = true;
     state.user = user.value.trim();
   } catch (e) { msg.value = e.message; }
+  finally { busy.value = false; }
 }
 </script>
 
@@ -37,7 +41,7 @@ async function doLogin() {
           <button class="ghost sm" type="button" @click="showPw = !showPw" title="显示/隐藏">👁</button>
         </div>
       </div>
-      <button class="login-btn" @click="doLogin">登录</button>
+      <button class="login-btn" :disabled="busy" @click="doLogin">{{ busy ? '登录中…' : '登录' }}</button>
       <div class="loading login-msg">{{ msg }}</div>
     </div>
   </div>

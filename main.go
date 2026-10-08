@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,10 +34,12 @@ type store struct {
 	mu     sync.RWMutex
 	tracks map[string]*model.Track
 	byPath map[string]string // path -> id
+	order  map[string]int64  // id -> 扫描（插入）序号，保证 /api/tracks 按扫描顺序稳定返回
+	seq    int64
 }
 
 func newStore() *store {
-	return &store{tracks: map[string]*model.Track{}, byPath: map[string]string{}}
+	return &store{tracks: map[string]*model.Track{}, byPath: map[string]string{}, order: map[string]int64{}}
 }
 
 func (s *store) add(t *model.Track) {
@@ -47,6 +50,8 @@ func (s *store) add(t *model.Track) {
 	}
 	s.tracks[t.ID] = t
 	s.byPath[t.Path] = t.ID
+	s.seq++
+	s.order[t.ID] = s.seq
 }
 
 func (s *store) all() []*model.Track {
@@ -56,6 +61,8 @@ func (s *store) all() []*model.Track {
 	for _, t := range s.tracks {
 		out = append(out, t)
 	}
+	// 按扫描顺序（插入序）稳定返回：先扫描到的在前，后扫描的递增在后
+	sort.Slice(out, func(i, j int) bool { return s.order[out[i].ID] < s.order[out[j].ID] })
 	return out
 }
 
@@ -91,8 +98,7 @@ func (s *store) removeByPath(p string) {
 }
 
 // scanState holds live progress of an asynchronous directory scan.
-type scanState struct {
-	mu      sync.Mutex
+type scanState struct {	mu      sync.Mutex
 	Running bool   `json:"running"`
 	Paused  bool   `json:"paused"`
 	Dir     string `json:"dir"`
@@ -424,6 +430,26 @@ func main() {
 		w.Write(img)
 	})
 
+	// 读取同目录外挂 .lrc 歌词文件
+	pm.HandleFunc("GET /api/tracks/{id}/lrcfile", func(w http.ResponseWriter, r *http.Request) {
+		t := store.get(r.PathValue("id"))
+		if t == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "track not found"})
+			return
+		}
+		lp := taglibx.LrcPath(t.Path)
+		if lp == "" {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "no lrc file"})
+			return
+		}
+		b, err := os.ReadFile(lp)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"name": filepath.Base(lp), "content": string(b)})
+	})
+
 	// Update tags of a track
 	pm.HandleFunc("POST /api/tracks/{id}/tags", func(w http.ResponseWriter, r *http.Request) {
 		t := store.get(r.PathValue("id"))
@@ -677,6 +703,14 @@ func main() {
 // encoding extension (detected from the header), e.g. "发如雪.mp3.flac" -> "发如雪.flac".
 // Known files (already in the store) are smart-skipped without re-reading tags,
 // and the scan can be paused/resumed via st.Paused.
+//
+// skipScanDirs lists NAS/system directory names (case-insensitive) that are
+// always skipped during scanning, e.g. Synology @eaDir / #recycle, hidden dirs.
+var skipScanDirs = map[string]bool{
+	"@eadir": true, "#recycle": true, "@__thumb": true, "@tmp": true,
+	"node_modules": true, "$recycle.bin": true, ".git": true, ".svn": true,
+}
+
 func scanDirLive(s *store, dir string, fp dedup.Fingerprinter, st *scanState, autoFix, autoRename bool) (int, error) {
 	st0, err := os.Stat(dir)
 	if err != nil {
@@ -695,6 +729,14 @@ func scanDirLive(s *store, dir string, fp dedup.Fingerprinter, st *scanState, au
 			time.Sleep(300 * time.Millisecond)
 		}
 		if d.IsDir() {
+			// 跳过隐藏目录与 NAS/系统常见目录（@eaDir、#recycle、@__thumb 等）
+			if strings.HasPrefix(d.Name(), ".") || skipScanDirs[strings.ToLower(d.Name())] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		// 跳过隐藏文件（.开头）
+		if strings.HasPrefix(d.Name(), ".") {
 			return nil
 		}
 		if !model.AudioExts[strings.ToLower(filepath.Ext(path))] {
@@ -831,6 +873,10 @@ func refreshTrack(s *store, path string, fp dedup.Fingerprinter) {
 	s.mu.Lock()
 	s.tracks[t.ID] = t
 	s.byPath[path] = t.ID
+	if _, ok := s.order[t.ID]; !ok {
+		s.seq++
+		s.order[t.ID] = s.seq
+	}
 	s.mu.Unlock()
 }
 

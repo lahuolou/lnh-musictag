@@ -22,6 +22,7 @@ type Track struct {
 	SampleRate uint            `json:"sampleRate"`
 	Channels uint              `json:"channels"`
 	HasCover bool              `json:"hasCover"`
+	HasLrcFile bool            `json:"hasLrcFile"` // 同目录存在外挂 .lrc 歌词文件
 	Tags     map[string]string `json:"tags"`     // flattened: first value per standardized key
 }
 

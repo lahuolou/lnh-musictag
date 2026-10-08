@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"go.senan.xyz/taglib"
 
@@ -49,10 +50,26 @@ func ReadTrack(path string) (*model.Track, error) {
 		SampleRate: props.SampleRate,
 		Channels:  props.Channels,
 		HasCover:  len(props.Images) > 0,
+		HasLrcFile: LrcPath(path) != "",
 		Tags:      flatten(tags),
 	}
 	tr.ID = pathID(path)
 	return tr, nil
+}
+
+// LrcPath returns the sibling .lrc lyric file path for an audio file
+// (case-insensitive), or "" if none exists. Chinese music libraries commonly
+// keep lyrics as external .lrc files next to the audio.
+func LrcPath(path string) string {
+	base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	dir := filepath.Dir(path)
+	for _, ext := range []string{".lrc", ".LRC", ".Lrc", ".lRC"} {
+		p := filepath.Join(dir, base+ext)
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p
+		}
+	}
+	return ""
 }
 
 // pathID derives a stable, unique-per-path id (unlike SHA256, which groups
