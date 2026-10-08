@@ -29,14 +29,43 @@
 
 ## 快速开始（Docker）
 
-前置：目标机已装 Docker（含 compose）。镜像为多阶段构建的静态二进制（scratch 运行层，约 10MB，带 CA 证书，构建时按目标机架构自动适配）。
-  docker镜像地址：ghcr.io/lahuolou/lnh-musictag:latest
+前置：目标机已装 Docker（含 compose）。
+
+> **镜像地址（GHCR）**：`ghcr.io/lahuolou/lnh-musictag:latest`
+> 由 GitHub 仓库 `lahuolou/lnh-musictag` 的 `main` 分支自动构建推送（`.github/workflows/docker.yml`），镜像为多阶段构建的静态二进制（scratch 运行层，约 10MB，带 CA 证书，构建时按目标机架构自动适配）。
+
+### 方式一：docker compose（推荐）
+
 ```bash
-# 1) 在项目目录构建并启动（或直接拉 GHCR 镜像）
-cd /path/to/LNH-musictag
+# 1) 拉取镜像并后台启动
+docker pull ghcr.io/lahuolou/lnh-musictag:latest
 docker compose up -d
 
-# 2) 编辑 docker-compose.yml，把 /mnt/sata3-1/mp3 改成你的真实音乐目录
+# 2) 首次使用请编辑 docker-compose.yml：
+#    - 把 /mnt/sata3-1/mp3 改成你的真实音乐目录（默认已挂载为 /music）
+#    - 端口默认 10248（host 端口可改）
+#    - 账号密码、AcoustID Key 可写在 LNH_ADMIN_USER / LNH_ADMIN_PASS / ACOUSTID_API_KEY（也可不写，首次启动自动生成随机密码，见下）
+```
+
+### 方式二：docker run（单条命令）
+
+```bash
+docker run -d --name lnh-musictag --restart unless-stopped \
+  -p 10248:10248 \
+  -v /mnt/sata3-1/mp3:/music \
+  -v lnh_config:/config \
+  -e LNH_ADMIN_USER=admin \
+  -e LNH_ADMIN_PASS='你的初始密码' \
+  ghcr.io/lahuolou/lnh-musictag:latest
+```
+
+> 不填 `LNH_ADMIN_PASS` 时，首次启动会在容器日志里打印随机初始密码（`docker logs lnh-musictag`），登录后到「设置」改密码（存数据库）。
+
+### 更新到最新版
+
+```bash
+docker compose pull && docker compose up -d                          # compose 方式
+docker pull ghcr.io/lahuolou/lnh-musictag:latest && docker restart lnh-musictag   # run 方式
 ```
 
 
