@@ -122,7 +122,6 @@ const t = cur;
         <div class="muted" style="font-size:12px">SHA256: {{ t().sha256.slice(0, 20) }}…</div>
       </div>
     </div>
-
     <label>标题 TITLE</label><input type="text" v-model="f.title" />
     <label>艺术家 ARTIST</label><input type="text" v-model="f.artist" />
     <label>专辑 ALBUM</label><input type="text" v-model="f.album" />
@@ -183,5 +182,5 @@ const t = cur;
       </div>
     </div>
   </div>
-  <div v-else class="muted">在「列表」tab 点击某一行曲目，在此编辑标签、获取歌词或刮削。</div>
+  <div v-else class="muted">在左侧列表点击某一行曲目，在此编辑标签、获取歌词或刮削。</div>
 </template>

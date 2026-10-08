@@ -2,35 +2,16 @@
 import { reactive, ref } from 'vue'
 import { state, toast, refresh } from '../store.js'
 import { api } from '../api.js'
+import FormatDialog from './FormatDialog.vue'
 
 const prog = ref(null)
 const skipFilled = ref(true)
+const fmtOpen = ref(false)
 
-// 格式转换
-const convertTarget = ref('flac')
-const convertRemove = ref(false)
-const convertBusy = ref(false)
-const convertFormats = ['mp3', 'flac', 'm4a', 'ogg', 'opus', 'wav']
 // 简繁转换
 const scriptTo = ref('trad')
 
-function needsSel() { if (state.selected.size === 0) { toast('请先在列表勾选曲目', 'err'); return false; } return true; }
-
-async function convert() {
-  if (!needsSel()) return;
-  convertBusy.value = true;
-  try {
-    const r = await api('/api/convert', {
-      method: 'POST',
-      body: JSON.stringify({ ids: [...state.selected], target: convertTarget.value, removeSource: convertRemove.value })
-    });
-    const ok = (r.results || []).filter(x => x.ok).length;
-    toast('格式转换完成：' + ok + '/' + r.total + ' 首', ok === r.total ? 'ok' : 'err');
-    clearSel();
-    await refresh();
-  } catch (e) { toast('格式转换失败: ' + e.message, 'err'); }
-  finally { convertBusy.value = false; }
-}
+function needsSel() { if (state.selected.size === 0) { toast('请先在左侧列表勾选曲目', 'err'); return false; } return true; }
 
 async function fixEnc() {
   if (!needsSel()) return;
@@ -131,7 +112,7 @@ function showProgress(jobId) {
 </script>
 
 <template>
-  <div class="muted" style="margin-bottom:10px">勾选②列表中的曲目（也可全选），自动从所选源补全下方勾选的字段；已含该标签的曲目自动跳过，节省硬件开销。</div>
+  <div class="muted" style="margin-bottom:10px">勾选左侧列表中的曲目（也可全选），自动从所选源补全下方勾选的字段；已含该标签的曲目自动跳过，节省硬件开销。</div>
 
   <div class="panel" style="margin-top:0">
     <div class="field-grid">
@@ -174,14 +155,11 @@ function showProgress(jobId) {
   <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
     <div class="h3">🔁 格式转换（ffmpeg 转码）</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:6px">
-      <select v-model="convertTarget" style="padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text)">
-        <option v-for="f in convertFormats" :key="f" :value="f">.{{ f }}</option>
-      </select>
-      <label class="chk"><input type="checkbox" class="tchk" v-model="convertRemove" /> 转换后删除原文件</label>
-      <button class="ghost sm" :disabled="convertBusy" @click="convert">转换勾选的 {{ state.selected.size }} 首</button>
+      <button class="ghost sm" @click="fmtOpen = true">格式转换…</button>
+      <span class="muted">批量转换音频格式、比特率和采样率，保存在同目录，不会删除源文件</span>
     </div>
-    <div class="muted" style="margin-top:4px">转码为 .{{ convertTarget }}（保留标签元数据）；不勾删除则原文件保留、新增一首。</div>
   </div>
+  <FormatDialog :open="fmtOpen" @close="fmtOpen = false" />
 
   <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
     <div class="h3">🧹 乱码修复</div>

@@ -22,7 +22,14 @@ var convertCodecs = map[string]string{
 	"ogg":  "libvorbis -q:a 5",
 	"opus": "libopus -b:a 128k",
 	"wav":  "pcm_s16le",
+	"aiff": "pcm_s16be",
+	"aac":  "aac -b:a 192k",
+	"wma":  "wmav2 -b:a 192k",
+	"tta":  "tta",
 }
+
+// losslessCodecs ignore bitrate settings.
+var losslessCodecs = map[string]bool{"flac": true, "wav": true, "aiff": true, "tta": true}
 
 // convertHandler transcodes selected tracks to a target format.
 func convertHandler(s *store, fp dedup.Fingerprinter) http.HandlerFunc {
@@ -30,18 +37,31 @@ func convertHandler(s *store, fp dedup.Fingerprinter) http.HandlerFunc {
 		var req struct {
 			IDs          []string `json:"ids"`
 			Target       string   `json:"target"`
+			InputFormats []string `json:"inputFormats"` // 留空=全部；按源文件扩展名过滤
+			Bitrate      string   `json:"bitrate"`      // 如 192k / keep / ""
+			SampleRate   string   `json:"sampleRate"`   // 如 44100 / keep / ""
 			RemoveSource bool     `json:"removeSource"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		target := strings.ToLower(strings.TrimSpace(req.Target))
-		codec, ok := convertCodecs[target]
-		if !ok {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "不支持的格式，可选: mp3/flac/m4a/ogg/opus/wav"})
-			return
+		inSet := map[string]bool{}
+		for _, f := range req.InputFormats {
+			f = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(f, ".")))
+			if f != "" {
+				inSet[f] = true
+			}
 		}
+		br := strings.ToLower(strings.TrimSpace(req.Bitrate))
+		if br == "keep" {
+			br = ""
+		}
+		sr := strings.ToLower(strings.TrimSpace(req.SampleRate))
+		if sr == "keep" {
+			sr = ""
+		}
+
 		list := resolveTracks(s, req.IDs)
 		type res struct {
 			ID     string `json:"id"`
@@ -52,20 +72,31 @@ func convertHandler(s *store, fp dedup.Fingerprinter) http.HandlerFunc {
 		}
 		results := []res{}
 		for _, t := range list {
-			// 已是目标格式则跳过
-			if t.Ext != "" && strings.EqualFold(strings.TrimPrefix(t.Ext, "."), target) {
-				results = append(results, res{ID: t.ID, Before: t.FileName, After: t.FileName, OK: true})
+			srcExt := strings.ToLower(strings.TrimPrefix(t.Ext, "."))
+			// 输入格式过滤
+			if len(inSet) > 0 && !inSet[srcExt] {
 				continue
 			}
+			target := strings.ToLower(strings.TrimSpace(req.Target))
+			if target == "keep" || target == "" {
+				target = srcExt
+			}
+			codec, ok := convertCodecs[target]
+			if !ok {
+				results = append(results, res{ID: t.ID, Before: t.FileName, Error: "不支持的目标格式: " + target})
+				continue
+			}
+			// 已是目标格式：仍可按比特率/采样率重编码
+			same := strings.EqualFold(srcExt, target)
 			dir := filepath.Dir(t.Path)
 			base := stripAudioExt(filepath.Base(t.Path))
 			dst := filepath.Join(dir, base+"."+target)
-			if err := ffmpegConvert(t.Path, dst, codec); err != nil {
+			if err := ffmpegConvert(t.Path, dst, codec, br, sr, losslessCodecs[target]); err != nil {
 				results = append(results, res{ID: t.ID, Before: t.FileName, Error: err.Error()})
 				continue
 			}
 			// 重新登记：删除原文件则替换曲目，否则新增一首
-			if req.RemoveSource {
+			if req.RemoveSource && !same {
 				s.remove(t.ID)
 				os.Remove(t.Path)
 			}
@@ -78,9 +109,16 @@ func convertHandler(s *store, fp dedup.Fingerprinter) http.HandlerFunc {
 
 // ffmpegConvert re-encodes src to dst with the given audio codec args,
 // keeping metadata tags via -map_metadata 0.
-func ffmpegConvert(src, dst, codecArgs string) error {
+func ffmpegConvert(src, dst, codecArgs, bitrate, sampleRate string, lossless bool) error {
 	parts := strings.Fields(codecArgs)
-	args := append([]string{"-y", "-i", src, "-map_metadata", "0", "-codec:a"}, parts...)
+	args := []string{"-y", "-i", src, "-map_metadata", "0", "-codec:a"}
+	args = append(args, parts...)
+	if bitrate != "" && !lossless {
+		args = append(args, "-b:a", bitrate)
+	}
+	if sampleRate != "" {
+		args = append(args, "-ar", sampleRate)
+	}
 	args = append(args, dst)
 	cmd := exec.Command("ffmpeg", args...)
 	out, err := cmd.CombinedOutput()

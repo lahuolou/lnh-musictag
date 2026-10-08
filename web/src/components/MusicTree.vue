@@ -4,17 +4,45 @@ import { state, toast, refresh, loadSources } from '../store.js'
 import { api } from '../api.js'
 
 const q = ref('')
+const filter = ref('all')
 const scanDir = ref(state.scanDir)
 const scanMsg = ref('')
 let poll = null
 
-// 表格列表：全部曲目（可按关键词过滤）
+// 繁体专有字（简体中不存在），用于“繁体”筛选
+const TRAD_SET = '這那們時間說學會後點對與應來為愛樂讓體識認請語質護車風華東開關馬鳥魚龍長發興義氣無見覺親觀邊還進過這這麼樣種頭裏條單雙萬億賣買價錢銀銅鐵鋼鹽糖湯飯餐館樓層廳室庫廚門窗牆橋輪機械電腦網線紙筆書畫際標準規則條約證據賬號碼鍵盤螢幕顯示頻錄影攝像鏡頭電池插座按鈕遙控';
+
+function isGarbled(t) {
+  const s = [t.fileName, t.tags.TITLE || '', t.tags.ARTIST || '', t.tags.ALBUM || ''].join(' ');
+  return /[\uFFFD]/.test(s) || /[ÃÂ][\u0080-\u00BF]/.test(s) || /â€[™“”Œ]/.test(s) || /[åæçèéêëìíîï][\u0080-\u00BF]{2}/.test(s);
+}
+function isTrad(t) {
+  const s = [t.tags.TITLE || '', t.tags.ARTIST || '', t.tags.ALBUM || ''].join(' ');
+  if (!/[\u4E00-\u9FFF]/.test(s)) return false;
+  return [...TRAD_SET].some(c => s.includes(c));
+}
+
+// 表格列表：全部曲目（可按关键词过滤 + 按问题类型筛选）
 const filtered = computed(() => {
   const kw = q.value.trim().toLowerCase();
-  if (!kw) return state.tracks;
-  return state.tracks.filter(t =>
-    [t.tags.TITLE || '', t.tags.ARTIST || '', t.tags.ALBUM || '', t.fileName].join(' ').toLowerCase().includes(kw));
+  let list = state.tracks;
+  if (kw) {
+    list = list.filter(t =>
+      [t.tags.TITLE || '', t.tags.ARTIST || '', t.tags.ALBUM || '', t.fileName].join(' ').toLowerCase().includes(kw));
+  }
+  if (filter.value === 'garbled') list = list.filter(isGarbled);
+  else if (filter.value === 'trad') list = list.filter(isTrad);
+  else if (filter.value === 'nolyric') list = list.filter(t => !hasLyrics(t));
+  else if (filter.value === 'nocover') list = list.filter(t => !t.hasCover);
+  return list;
 });
+const filterOpts = [
+  { id: 'all', label: '全部' },
+  { id: 'garbled', label: '乱码' },
+  { id: 'trad', label: '繁体' },
+  { id: 'nolyric', label: '无歌词' },
+  { id: 'nocover', label: '无封面' }
+];
 
 // 文件名（去音频扩展名），如 陈小春 - 街角的晚风.flac → 陈小春 - 街角的晚风
 function trackName(t) {
@@ -81,6 +109,9 @@ onBeforeUnmount(stopPoll);
       <div class="row" style="margin-top:8px">
         <input type="text" v-model="q" placeholder="搜索标题/艺术家/专辑/文件名" style="min-width:0" @keydown.enter="doSearch" />
         <button class="ghost sm" @click="doSearch">搜索</button>
+      </div>
+      <div class="filters" style="margin-top:8px">
+        <button v-for="f in filterOpts" :key="f.id" class="chip" :class="{ on: filter === f.id }" @click="filter = f.id">{{ f.label }}</button>
       </div>
       <div class="loading">{{ scanMsg }}</div>
     </div>
