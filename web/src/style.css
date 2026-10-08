@@ -54,7 +54,7 @@ button.danger{background:#7a2d2d}
 table{width:100%;border-collapse:collapse;background:var(--panel);border-radius:12px;overflow:hidden;font-size:14px}
 th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line)}
 th{background:var(--panel2);color:var(--muted);font-weight:600;position:sticky;top:0}
-tr:hover td{background:#20242e}
+tr:hover td{background:var(--panel2)}
 .thumb{width:40px;height:40px;border-radius:6px;object-fit:cover;background:var(--panel2)}
 .muted{color:var(--muted)}
 .tag{display:inline-block;font-size:11px;padding:2px 7px;border-radius:8px;margin-right:4px}
@@ -72,7 +72,7 @@ label{display:block;font-size:12px;color:var(--muted);margin:8px 0 4px}
 .res-item .acts{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap}
 .dup{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
 .dup:last-child{border-bottom:none}
-.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#22272f;border:1px solid var(--line);padding:10px 16px;border-radius:10px;font-size:14px;z-index:50}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--panel2);color:var(--text);border:1px solid var(--line);padding:10px 16px;border-radius:10px;font-size:14px;z-index:50;box-shadow:0 4px 16px rgba(0,0,0,.25)}
 .toast.err{border-color:var(--err)}
 .toast.ok{border-color:var(--ok)}
 .loading{color:var(--muted)}
