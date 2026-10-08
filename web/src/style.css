@@ -10,6 +10,25 @@
   --ok:#168a43; --warn:#b9790f; --err:#d33737;
 }
 .field-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(126px,1fr));gap:8px 12px}
+/* 整合布局：左树 + 右功能区 */
+.main{display:grid;grid-template-columns:400px 1fr;gap:16px;align-items:start;max-width:1400px;margin:0 auto;padding:16px 20px}
+@media(max-width:960px){.main{grid-template-columns:1fr}}
+.left-panel{position:sticky;top:56px;display:flex;flex-direction:column;gap:12px}
+.left-panel .tree{max-height:calc(100vh - 210px);overflow:auto;margin-top:6px;border-top:1px solid var(--line);padding-top:6px}
+.tnode{display:flex;align-items:center;gap:6px;padding:3px 6px;border-radius:6px;font-size:13px}
+.tnode:hover{background:var(--panel2)}
+.tog{width:16px;text-align:center;color:var(--muted);cursor:pointer;flex:0 0 auto}
+.di{flex:0 0 auto}
+.dn{font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cnt{font-size:11px;flex:0 0 auto}
+.tt{cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px}
+.tt:hover{color:var(--accent)}
+.ar{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px}
+.right-panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;min-height:70vh}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:14px}
+.tab{background:none;border:none;color:var(--muted);padding:8px 14px;font-size:14px;cursor:pointer;border-radius:8px 8px 0 0;border-bottom:2px solid transparent}
+.tab:hover{color:var(--text)}
+.tab.on{color:var(--text);font-weight:600;border-bottom-color:var(--accent)}
 *{box-sizing:border-box}
 body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text)}
 header{padding:16px 24px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--panel)}

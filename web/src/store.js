@@ -5,6 +5,7 @@ export const state = reactive({
   authed: false,
   user: '',
   route: location.hash.slice(1) || '/',
+  activeTab: 'edit',
   tracks: [],
   selected: new Set(),
   sources: [],
@@ -38,15 +39,15 @@ export async function loadSources() {
   try { state.sources = await api('/api/scrape/sources'); }
   catch (e) {
     state.sources = [
-      { name: 'auto', label: '自动' }, { name: 'musicbrainz', label: 'MusicBrainz' },
+      { name: 'auto', label: '自动（按语言优选）' }, { name: 'musicbrainz', label: 'MusicBrainz' },
       { name: 'itunes', label: 'iTunes' }, { name: 'netease', label: '网易云' }, { name: 'qq', label: 'QQ音乐' }
     ];
   }
 }
 
 export async function refresh() {
-  try { state.tracks = await api('/api/tracks'); }
-  catch (e) { toast('加载失败: ' + e.message, 'err'); return; }
+  // 静默刷新：更新列表不弹窗、不打断操作
+  try { state.tracks = await api('/api/tracks'); } catch (e) { /* 静默 */ }
   await loadDups();
 }
 

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // SearchResult is the unified metadata hit returned by any scrape source.
@@ -47,6 +48,11 @@ type MultiSource struct {
 	order  []string
 }
 
+// Source preference groups used by auto: Chinese queries hit domestic sources
+// first, Latin-script queries hit international sources first.
+var domesticOrder = []string{"netease", "qq", "kugou", "kuwo", "migu", "bilibili", "qishui", "bodian", "qianqian"}
+var internationalOrder = []string{"musicbrainz", "itunes"}
+
 // NewMultiSource registers all built-in sources.
 func NewMultiSource() *MultiSource {
 	m := &MultiSource{client: NewClient(), byName: map[string]Source{}}
@@ -76,7 +82,7 @@ func (m *MultiSource) Client() *Client { return m.client }
 
 // Sources returns the ordered source list (for the UI dropdown).
 func (m *MultiSource) Sources() []SourceInfo {
-	out := []SourceInfo{{Name: "auto", Label: "自动（依次尝试）"}}
+	out := []SourceInfo{{Name: "auto", Label: "自动（按语言优选：中文→国内源，外文→国际源）"}}
 	for _, n := range m.order {
 		s := m.byName[n]
 		out = append(out, SourceInfo{Name: n, Label: s.Label()})
@@ -84,8 +90,19 @@ func (m *MultiSource) Sources() []SourceInfo {
 	return out
 }
 
-// Search runs a source by name. "auto" (or empty) tries all sources in order
-// until one returns results.
+// hasCJK reports whether the query contains any CJK (Chinese) character.
+func hasCJK(s string) bool {
+	for _, r := range s {
+		if unicode.Is(unicode.Han, r) {
+			return true
+		}
+	}
+	return false
+}
+
+// Search runs a source by name. "auto" (or empty) prefers sources by language:
+// Chinese queries try domestic sources first, foreign/Latin queries try
+// international sources first, falling back to the other group.
 func (m *MultiSource) Search(name, query string, limit int) ([]SearchResult, error) {
 	if name == "" {
 		name = "auto"
@@ -97,9 +114,19 @@ func (m *MultiSource) Search(name, query string, limit int) ([]SearchResult, err
 		}
 		return s.Search(m.client, query, limit)
 	}
+	var order []string
+	if hasCJK(query) {
+		order = append(domesticOrder, internationalOrder...)
+	} else {
+		order = append(internationalOrder, domesticOrder...)
+	}
 	var lastErr error
-	for _, n := range m.order {
-		res, err := m.byName[n].Search(m.client, query, limit)
+	for _, n := range order {
+		s, ok := m.byName[n]
+		if !ok {
+			continue
+		}
+		res, err := s.Search(m.client, query, limit)
 		if err != nil {
 			lastErr = err
 			continue
@@ -145,7 +172,6 @@ func (m *MultiSource) Enrich(sr *SearchResult) {
 }
 
 // FetchCover fetches cover art bytes for a result according to its source.
-// Returns (nil, nil) when the source has no cover.// Returns (nil, nil) when the source has no cover.
 func (m *MultiSource) FetchCover(sr SearchResult) ([]byte, error) {
 	if sr.Source == "musicbrainz" && sr.ReleaseMBID != "" {
 		return m.client.FetchCover(sr.ReleaseMBID)
@@ -159,7 +185,8 @@ func (m *MultiSource) FetchCover(sr SearchResult) ([]byte, error) {
 	return nil, nil
 }
 
-// neteaseAlbumCover resolves cover art via the NetEase album detail endpoint// (the search API usually omits picUrl). Note: NetEase returns code -462 (a
+// neteaseAlbumCover resolves cover art via the NetEase album detail endpoint
+// (the search API usually omits picUrl). Note: NetEase returns code -462 (a
 // block) when Accept: application/json is sent, so this uses a plain request.
 func (c *Client) neteaseAlbumCover(albumID string) ([]byte, error) {
 	u := "https://music.163.com/api/album/" + url.PathEscape(albumID)

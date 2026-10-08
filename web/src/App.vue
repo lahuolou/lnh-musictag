@@ -3,10 +3,10 @@ import { onMounted, ref } from 'vue'
 import { state, logout } from './store.js'
 import { api } from './api.js'
 import Login from './views/Login.vue'
-import Tracks from './views/Tracks.vue'
-import Edit from './views/Edit.vue'
-import Dedup from './views/Dedup.vue'
-import Batch from './views/Batch.vue'
+import MusicTree from './components/MusicTree.vue'
+import EditPanel from './components/EditPanel.vue'
+import BatchPanel from './components/BatchPanel.vue'
+import DedupPanel from './components/DedupPanel.vue'
 import Settings from './views/Settings.vue'
 import Toast from './components/Toast.vue'
 
@@ -17,24 +17,7 @@ function applyTheme() {
 }
 function toggleTheme() { theme.value = theme.value === 'dark' ? 'light' : 'dark'; applyTheme(); }
 
-function route() {
-  const h = state.route || location.hash.slice(1) || '/';
-  if (h.startsWith('/edit')) return 'edit';
-  if (h === '/dedup') return 'dedup';
-  if (h === '/batch') return 'batch';
-  if (h === '/settings') return 'settings';
-  return 'tracks';
-}
-function go(h) { state.route = h; location.hash = h; }
-
-window.addEventListener('hashchange', () => {
-  state.route = location.hash.slice(1) || '/';
-});
-window.addEventListener('unauth', () => {
-  state.authed = false;
-  state.route = '/';
-  location.hash = '/';
-});
+function tab(name) { state.activeTab = name; }
 
 onMounted(async () => {
   applyTheme();
@@ -53,22 +36,25 @@ onMounted(async () => {
   <template v-else>
     <nav class="topnav">
       <span class="brand">🎵 LNH-MusicTag</span>
-      <button class="navlink" :class="{ on: route() === 'tracks' }" @click="go('/')">曲目</button>
-      <button class="navlink" :class="{ on: route() === 'edit' }" @click="go('/edit/')">编辑</button>
-      <button class="navlink" :class="{ on: route() === 'dedup' }" @click="go('/dedup')">去重</button>
-      <button class="navlink" :class="{ on: route() === 'batch' }" @click="go('/batch')">批量</button>
       <span class="spacer"></span>
-      <span class="badge">{{ state.fpActive ? '指纹: 启用' : '指纹: 未启用' }}</span>
+      <span class="badge">曲目 {{ state.tracks.length }}</span>
       <button class="navlink" :title="theme === 'dark' ? '切换到白天模式' : '切换到黑夜模式'" @click="toggleTheme">{{ theme === 'dark' ? '🌙' : '☀️' }}</button>
-      <button class="navlink" :class="{ on: route() === 'settings' }" @click="go('/settings')">⚙️ 设置</button>
       <button class="ghost sm" @click="logout">退出</button>
     </nav>
-    <div class="wrap">
-      <Tracks v-if="route() === 'tracks'" />
-      <Edit v-else-if="route() === 'edit'" />
-      <Dedup v-else-if="route() === 'dedup'" />
-      <Batch v-else-if="route() === 'batch'" />
-      <Settings v-else-if="route() === 'settings'" />
+    <div class="main">
+      <MusicTree />
+      <div class="right-panel">
+        <div class="tabs">
+          <button class="tab" :class="{ on: state.activeTab === 'edit' }" @click="tab('edit')">编辑/刮削</button>
+          <button class="tab" :class="{ on: state.activeTab === 'batch' }" @click="tab('batch')">批量</button>
+          <button class="tab" :class="{ on: state.activeTab === 'dedup' }" @click="tab('dedup')">去重</button>
+          <button class="tab" :class="{ on: state.activeTab === 'settings' }" @click="tab('settings')">设置</button>
+        </div>
+        <EditPanel v-if="state.activeTab === 'edit'" />
+        <BatchPanel v-else-if="state.activeTab === 'batch'" />
+        <DedupPanel v-else-if="state.activeTab === 'dedup'" />
+        <Settings v-else-if="state.activeTab === 'settings'" />
+      </div>
     </div>
   </template>
   <Toast />
