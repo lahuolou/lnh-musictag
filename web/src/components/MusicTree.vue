@@ -10,7 +10,7 @@ const scanMsg = ref('')
 const collapsed = ref(new Set())
 let poll = null
 
-// 由 track.path 构建目录树（目录 → 文件）
+// 树形结构：目录 → 曲目名（按曲目所在目录分组，两级）
 const tree = computed(() => {
   const kw = q.value.trim().toLowerCase();
   let list = state.tracks;
@@ -18,22 +18,17 @@ const tree = computed(() => {
     list = state.tracks.filter(t =>
       [t.tags.TITLE || '', t.tags.ARTIST || '', t.tags.ALBUM || '', t.fileName].join(' ').toLowerCase().includes(kw));
   }
-  const root = { name: '全部音乐', dir: true, path: '', children: [] };
+  const dirs = new Map();
   for (const t of list) {
     const parts = t.path.split(/[\\/]+/).filter(Boolean);
-    let cur = root, path = '';
-    for (let i = 0; i < parts.length - 1; i++) {
-      path = path ? path + '/' + parts[i] : parts[i];
-      let child = cur.children.find(c => c.dir && c.name === parts[i]);
-      if (!child) {
-        child = { name: parts[i], dir: true, path, children: [] };
-        cur.children.push(child);
-      }
-      cur = child;
-    }
-    cur.children.push({ name: t.fileName, dir: false, track: t });
+    const dirPath = parts.slice(0, -1).join('/');
+    let d = dirs.get(dirPath);
+    if (!d) { d = { name: dirPath || '/', dir: true, path: dirPath, children: [] }; dirs.set(dirPath, d); }
+    d.children.push({ name: t.fileName, dir: false, track: t });
   }
-  return root;
+  const arr = [...dirs.values()].sort((a, b) => a.name.localeCompare(b.name, 'zh'));
+  for (const d of arr) d.children.sort((a, b) => a.name.localeCompare(b.name, 'zh'));
+  return arr;
 })
 
 function isCollapsed(node) { return collapsed.value.has(node.path); }
@@ -118,7 +113,7 @@ onBeforeUnmount(stopPoll);
         曲目 {{ state.tracks.length }} · 勾选后到右侧「批量」补全
       </div>
       <div class="tree">
-        <TreeNode v-for="n in tree.children" :key="n.name + '|' + n.path" :node="n" :depth="0"
+        <TreeNode v-for="n in tree" :key="n.path" :node="n" :depth="0"
           :collapsed="collapsed" :selected="state.selected"
           :toggle="toggle" :openTrack="openTrack" :toggleSel="toggleSel"
           :artists="artists" :folderCount="folderCount" />
