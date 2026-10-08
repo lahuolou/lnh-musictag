@@ -295,7 +295,7 @@ func main() {
 			}
 			artist := strings.TrimSpace(t.Tags["ARTIST"])
 			parts := strings.FieldsFunc(artist, func(r rune) bool {
-				return r == '/' || r == ';' || r == '、' || r == '，' || r == ',' || r == '&'
+				return r == '/' || r == ';' || r == '、' || r == '，' || r == ',' || r == '&' || r == '_'
 			})
 			uniq := map[string]bool{}
 			for _, p := range parts {

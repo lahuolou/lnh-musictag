@@ -173,7 +173,7 @@ function showProgress(jobId) {
     <div class="h3">🎤 艺术家处理</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:6px">
       <button class="ghost sm" @click="setChorus">艺术家>3 位 → 改为“合唱”</button>
-      <span class="muted">按 / ; 、 ， 拆分艺术家，超过 3 位时统一改为“合唱”</span>
+      <span class="muted">按 / ; 、 ， _ 拆分艺术家，超过 3 位时统一改为“合唱”</span>
     </div>
   </div>
 
