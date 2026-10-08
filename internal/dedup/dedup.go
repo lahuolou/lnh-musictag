@@ -36,7 +36,8 @@ func qualityScore(t *model.Track) int {
 	return tier*100000 + int(t.Bitrate)*100 + int(t.SampleRate)
 }
 
-// GroupByArtistTitle groups tracks whose ARTIST + TITLE tags match (normalized).
+// GroupByArtistTitle groups tracks whose ARTIST + TITLE tags match (normalized),
+// falling back to the filename's "artist - title" pattern when a tag is empty.
 // Catches the common "same song ripped twice with different filenames" case.
 // The track with the best audio quality is flagged as the keeper (KeepID).
 func GroupByArtistTitle(tracks []*model.Track) []model.DuplicateGroup {
@@ -44,10 +45,21 @@ func GroupByArtistTitle(tracks []*model.Track) []model.DuplicateGroup {
 	for _, t := range tracks {
 		artist := strings.ToLower(strings.TrimSpace(t.Tags["ARTIST"]))
 		title := strings.ToLower(strings.TrimSpace(t.Tags["TITLE"]))
+		// 标签缺失/为空时，从文件名“艺术家 - 标题”解析补齐，
+		// 保证空标签的库也能正确识别同歌不同名；文件名不同则自然不同组。
+		if artist == "" || title == "" {
+			fArtist, fTitle := parseArtistTitle(t.FileName)
+			if artist == "" {
+				artist = fArtist
+			}
+			if title == "" {
+				title = fTitle
+			}
+		}
 		if artist == "" || title == "" {
 			continue
 		}
-		key := artist + "||" + title
+		key := artist + "\x1f" + title
 		byKey[key] = append(byKey[key], t)
 	}
 	groups := []model.DuplicateGroup{}
@@ -65,14 +77,38 @@ func GroupByArtistTitle(tracks []*model.Track) []model.DuplicateGroup {
 		for _, t := range ts {
 			ids = append(ids, t.ID)
 		}
-		// key: "artist||title" -> 展示用 "artist - title"
-		display := strings.Replace(key, "||", " - ", 1)
+		parts := strings.Split(key, "\x1f")
 		groups = append(groups, model.DuplicateGroup{
-			Key: display, Method: "tags", Count: len(ids), IDs: ids, KeepID: best.ID,
+			Key: parts[0] + " - " + parts[1], Method: "tags", Count: len(ids), IDs: ids, KeepID: best.ID,
 		})
 	}
 	sort.Slice(groups, func(i, j int) bool { return groups[i].Count > groups[j].Count })
 	return groups
+}
+
+// parseArtistTitle splits "艺术家 - 标题.ext" (and variants with 、/; separators)
+// into (artist, title). It also strips trailing audio extensions from the whole
+// name first, so "陈慧娴 - 傻女.flac" -> ("陈慧娴", "傻女").
+func parseArtistTitle(fn string) (string, string) {
+	base := strings.TrimSpace(fn)
+	for {
+		ext := strings.ToLower(filepath.Ext(base))
+		if ext == "" || !model.AudioExts[ext] {
+			break
+		}
+		base = strings.TrimSuffix(base, ext)
+	}
+	base = strings.TrimSpace(base)
+	for _, sep := range []string{" - ", "-", " — ", "–"} {
+		if i := strings.LastIndex(base, sep); i > 0 {
+			artist := strings.TrimSpace(base[:i])
+			title := strings.TrimSpace(base[i+len(sep):])
+			if artist != "" && title != "" {
+				return artist, title
+			}
+		}
+	}
+	return "", base
 }
 
 // cleanBaseName strips all trailing audio extensions and lowercases a filename,

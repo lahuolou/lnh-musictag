@@ -59,11 +59,29 @@ const filterOpts = [
 ];
 const filtering = computed(() => q.value.trim() !== '' || filter.value !== 'all');
 
+// 文件名显示名：去尾部音频后缀（发如雪.mp3.flac -> 发如雪）
+function baseName(t) {
+  let n = t.fileName || '';
+  while (true) {
+    const m = n.match(/\.(mp3|flac|wav|m4a|aac|ogg|opus|ape|wma|aiff|mka)$/i);
+    if (!m) break;
+    n = n.slice(0, n.length - m[0].length);
+  }
+  return n;
+}
+// 从“艺术家 - 标题”文件名解析艺术家（标签为空时回退显示）
+function nameArtist(t) {
+  const m = (t.fileName || '').replace(/\.(mp3|flac|wav|m4a|aac|ogg|opus|ape|wma|aiff|mka)$/i, '').match(/^(.*?)[\s\-—–]+([^\-—–]+)$/);
+  return m ? m[1].trim() : '';
+}
+function displayTitle(t) { return (t.tags.TITLE || '').trim() || baseName(t); }
+function displayArtist(t) { return (t.tags.ARTIST || '').trim() || nameArtist(t); }
+
 // 排序
 function sortVal(t, k) {
   switch (k) {
-    case 'title': return t.tags.TITLE || '';
-    case 'artist': return t.tags.ARTIST || '';
+    case 'title': return displayTitle(t);
+    case 'artist': return displayArtist(t);
     case 'album': return t.tags.ALBUM || '';
     case 'albumartist': return t.tags.ALBUMARTIST || '';
     case 'year': return parseInt(t.tags.DATE || '', 10) || 0;
@@ -215,8 +233,8 @@ onBeforeUnmount(stopPoll);
               <img v-if="t.hasCover" class="cov" :src="coverUrl(t.id)" loading="lazy" @click.stop="openTrack(t)" />
               <span v-else class="covph">♪</span>
             </td>
-            <td>{{ t.tags.TITLE || '' }}</td>
-            <td>{{ t.tags.ARTIST || '' }}</td>
+            <td :title="t.tags.TITLE ? t.tags.TITLE : baseName(t)">{{ displayTitle(t) }}</td>
+            <td :title="t.tags.ARTIST ? t.tags.ARTIST : nameArtist(t)">{{ displayArtist(t) }}</td>
             <td>{{ t.tags.ALBUM || '' }}</td>
             <td>{{ t.tags.ALBUMARTIST || '' }}</td>
             <td>{{ hasLyrics(t) ? '有' : '无' }}</td>

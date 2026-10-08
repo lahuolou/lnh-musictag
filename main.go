@@ -654,7 +654,7 @@ func main() {
 			switch req.Source {
 			case "musicbrainz":
 				tags[taglibx.MBTrackID] = []string{v}
-			case "itunes", "netease", "qq", "kugou", "kuwo", "migu", "bilibili", "qishui", "qianqian":
+			case "itunes", "netease", "qq", "kugou", "kuwo", "migu", "bilibili", "qishui":
 				tags[taglibx.Comment] = []string{req.Source + ":" + v}
 			}
 		}

@@ -2,7 +2,7 @@
 
 纯 **Docker 部署**的自托管 Web 音乐标签管理工具：**标签读写 + 歌曲去重 + 多源元数据/歌词刮削 + 批量修正 + 格式转换 + 异步扫描**，全部操作通过浏览器后台完成，无本地 CLI。
 
-技术栈：**Go 后端（go-taglib WASM 封装 TagLib，无 CGo）+ 纯 Go SHA256 去重 + 11 个刮削源 + 歌词 + Vue3 多页面前端**，配置存 **SQLite**（不依赖环境变量）。
+技术栈：**Go 后端（go-taglib WASM 封装 TagLib，无 CGo）+ 纯 Go SHA256 去重 + 10 个刮削源（国内优先）+ 歌词 + Vue3 多页面前端**，配置存 **SQLite**（不依赖环境变量）。
 
 前端用 **Vue 3 + Vite**（比 React 运行时更轻），构建产物约 90KB JS，`go:embed` 进单个静态二进制，Docker 多阶段构建（node → Go → scratch），运行时无 node 依赖、不额外占内存。
 
@@ -13,7 +13,7 @@
 | ① 标签读写 | `go.senan.xyz/taglib`（WASM，无 CGo，MP3/FLAC/M4A/OGG/WAV/WMA…），多值标签、内嵌封面 | 写标题/艺术家/专辑/专辑艺术家/流派/年份/曲目号/封面/歌词 |
 | ② 异步扫描 | `/api/scan` 后台任务，**边扫边入库**；前端轮询 `/api/scan/status` 增量渲染曲目，不等全部扫完 | 扫描期间即见曲目 |
 | ③ 歌曲去重 | SHA256 文件哈希（默认）+ 音频指纹（可插拔）+ **同名多格式**（同名不同格式保留音质最佳）+ **艺术家+标题**（同歌不同名） | 去重页 |
-| ④ 多源刮削 | **11 个源**：MusicBrainz / iTunes / 网易云 / QQ / 酷狗 / 酷我 / 咪咕 / 哔哩哔哩 / 汽水 / 波点 / 千千 | 搜索/应用，自动依次尝试 |
+| ④ 多源刮削 | **10 个源**：网易云 / QQ / 酷狗 / 酷我 / 咪咕 / 哔哩哔哩 / 汽水 / 波点（国内）＋ MusicBrainz / iTunes（国际），**国内源优先** | 搜索/应用，自动依次尝试 |
 | ⑤ 补全元数据 | MusicBrainz release 详情回填**专辑艺术家、流派、年代、曲目号**；写入标签 | 批量/单曲刮削均可 |
 | ⑥ 歌词 | 网易云 LRC + lrclib，自动选择 | 单曲获取/编辑/保存，批量「含歌词」 |
 | ⑦ 批量 | 勾选曲目 → 批量刮削；**字段可选**（海报/歌名/艺术家/流派/年代/专辑艺术家/曲目号/歌词），**智能跳过**已有标签的曲目 | 批量页 |
@@ -110,7 +110,7 @@ LNH-musictag/
     audiofmt/             # 文件头魔数检测真实音频编码格式（文件重命名用）
     taglibx/              # 标签读写封装（go-taglib，含 LYRICS 歌词）
     dedup/                # SHA256 去重 + Fingerprinter 接口
-    scrape/               # 11 个源：sources/musicbrainz/itunes/netease/qq/kugou/kuwo/migu/bilibili/qishui/bodian/qianqian + lyrics
+    scrape/               # 10 个源：sources/netease/qq/kugou/kuwo/migu/bilibili/qishui/bodian/musicbrainz/itunes + lyrics
   web/                    # Vue3 + Vite 前端（构建产物 dist 被 go:embed 编译进二进制）
     src/
       main.js             # Vue 入口
@@ -127,8 +127,6 @@ LNH-musictag/
 | 源 | 类型 | 封面 | 歌词 |
 |---|---|---|---|
 | 自动 | 依次尝试 | 由命中的源决定 | 自动选择 |
-| MusicBrainz | 国际 | Cover Art Archive ✓ | lrclib |
-| iTunes | 国际 | artworkUrl ✓ | lrclib |
 | 网易云音乐 | 国内 | 专辑详情 ✓ | 网易云 LRC ✓ |
 | QQ音乐 | 国内 | albummid ✓ | QQ 歌词 |
 | 酷狗音乐 | 国内 | 专辑封面 ✓ | 自动 |
@@ -137,9 +135,10 @@ LNH-musictag/
 | 哔哩哔哩 | 国内 | - | 自动 |
 | 汽水音乐 | 国内（Douyin，可能被反爬拦截） | - | 自动 |
 | 波点音乐 | 国内（无公开搜索接口，占位） | - | 自动 |
-| 千千音乐 | 国内（旧接口，可能失效） | - | 自动 |
+| MusicBrainz | 国际 | Cover Art Archive ✓ | lrclib |
+| iTunes | 国际 | artworkUrl ✓ | lrclib |
 
-> 汽水/波点/千千部分网络/机房可能被反爬拦截或接口失效；`auto` 会自动跳过失败源，依次尝试可用源。歌词优先用命中的国内源 ID 取 LRC，否则按标题+艺术家搜网易云，再退 lrclib。
+> 中文查询 `auto` 自动按 国内源 → 国际源 依次尝试，外文查询反之；失败源自动跳过。歌词优先用命中的国内源 ID 取 LRC，否则按标题+艺术家搜网易云，再退 lrclib。**千千音乐（百度）旧接口已下线（HTTPS 证书不匹配且返回 500），已从源列表移除。**
 
 ## API 一览
 
@@ -178,6 +177,6 @@ LNH-musictag/
 
 - 服务监听 `:10248`，经 compose 映射到宿主 `10248`，局域网内可访问。
 - **刮削源各有速率限制**（MusicBrainz ~1 请求/秒）；批量刮削逐曲间已内置 1.1s 节流。
-- 汽水/波点/千千依赖第三方接口，可能被反爬拦截或失效，`auto` 会自动跳过。
+- 汽水/波点依赖第三方接口，可能被反爬拦截或失效，`auto` 会自动跳过。
 - AcoustID 指纹识别需在「设置」页填 API Key；默认走文本搜索，无需 key。
 - 封面写入对 WAV 等容器依赖 TagLib 支持；主流 MP3/FLAC/M4A 均支持。
