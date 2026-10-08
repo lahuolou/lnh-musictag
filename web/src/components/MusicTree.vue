@@ -2,54 +2,38 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { state, toast, refresh, loadSources } from '../store.js'
 import { api } from '../api.js'
-import TreeNode from './TreeNode.vue'
 
 const q = ref('')
 const scanDir = ref(state.scanDir)
 const scanMsg = ref('')
-const collapsed = ref(new Set())
 let poll = null
 
-// 树形结构：目录 → 曲目名（按曲目所在目录分组，两级）
-const tree = computed(() => {
+// 表格列表：全部曲目（可按关键词过滤）
+const filtered = computed(() => {
   const kw = q.value.trim().toLowerCase();
-  let list = state.tracks;
-  if (kw) {
-    list = state.tracks.filter(t =>
-      [t.tags.TITLE || '', t.tags.ARTIST || '', t.tags.ALBUM || '', t.fileName].join(' ').toLowerCase().includes(kw));
-  }
-  const dirs = new Map();
-  for (const t of list) {
-    const parts = t.path.split(/[\\/]+/).filter(Boolean);
-    const dirPath = parts.slice(0, -1).join('/');
-    let d = dirs.get(dirPath);
-    if (!d) { d = { name: dirPath || '/', dir: true, path: dirPath, children: [] }; dirs.set(dirPath, d); }
-    d.children.push({ name: t.fileName, dir: false, track: t });
-  }
-  const arr = [...dirs.values()].sort((a, b) => a.name.localeCompare(b.name, 'zh'));
-  for (const d of arr) d.children.sort((a, b) => a.name.localeCompare(b.name, 'zh'));
-  return arr;
-})
+  if (!kw) return state.tracks;
+  return state.tracks.filter(t =>
+    [t.tags.TITLE || '', t.tags.ARTIST || '', t.tags.ALBUM || '', t.fileName].join(' ').toLowerCase().includes(kw));
+});
 
-function isCollapsed(node) { return collapsed.value.has(node.path); }
-function toggle(node) {
-  const s = new Set(collapsed.value);
-  if (s.has(node.path)) s.delete(node.path); else s.add(node.path);
-  collapsed.value = s;
+// 文件名（去音频扩展名），如 陈小春 - 街角的晚风.flac → 陈小春 - 街角的晚风
+function trackName(t) {
+  return (t.fileName || '').replace(/\.(mp3|flac|m4a|aac|ogg|opus|wav|wma|ape|mpc|aiff|mka)$/i, '');
 }
-function openTrack(t) {
-  state.currentId = t.id;
-  state.activeTab = 'edit';
+function coverUrl(id) { return '/api/tracks/' + encodeURIComponent(id) + '/cover'; }
+function hasLyrics(t) { return !!(t.tags.LYRICS || '').trim(); }
+function hasLrc(t) { return /\[\d{1,2}:\d{2}/.test(t.tags.LYRICS || ''); }
+function isAllSel() { return filtered.value.length > 0 && filtered.value.every(t => state.selected.has(t.id)); }
+function toggleAll(e) {
+  if (e.target.checked) filtered.value.forEach(t => state.selected.add(t.id));
+  else filtered.value.forEach(t => state.selected.delete(t.id));
 }
 function toggleSel(t, ev) {
   if (ev.target.checked) state.selected.add(t.id); else state.selected.delete(t.id);
 }
-function artists(t) { return (t.tags.ARTIST || '').replace(/ \/ /g, ', '); }
-function folderCount(node) {
-  let n = 0;
-  const walk = (nd) => { if (!nd.dir) n++; else nd.children.forEach(walk); };
-  walk(node);
-  return n;
+function openTrack(t) {
+  state.currentId = t.id;
+  state.activeTab = 'edit';
 }
 
 async function scan() {
@@ -78,15 +62,9 @@ async function tick() {
 }
 function startPoll() { stopPoll(); poll = setInterval(tick, 800); }
 function stopPoll() { if (poll) { clearInterval(poll); poll = null; } }
-
-function treeTrackCount(nodes) {
-  let n = 0;
-  for (const nd of nodes) { n += nd.dir ? treeTrackCount(nd.children) : 1; }
-  return n;
-}
 function doSearch() {
   if (!q.value.trim()) { toast('请输入搜索关键词', 'err'); return; }
-  toast('搜索完成：共 ' + treeTrackCount(tree.value) + ' 首匹配', 'ok');
+  toast('搜索完成：共 ' + filtered.value.length + ' 首匹配', 'ok');
 }
 
 onMounted(async () => { await loadSources(); await refresh(); if (state.scanStatus.running) startPoll(); });
@@ -108,13 +86,46 @@ onBeforeUnmount(stopPoll);
     </div>
 
     <div class="ml-head">
-      曲目 {{ state.tracks.length }} · 勾选后到「批量」补全 · 点击曲目进「编辑」
+      曲目 {{ filtered.length }} · 勾选后到「批量」补全 · 点击行进「编辑」
     </div>
-    <div class="tree">
-      <TreeNode v-for="n in tree" :key="n.path" :node="n" :depth="0"
-        :collapsed="collapsed" :selected="state.selected"
-        :toggle="toggle" :openTrack="openTrack" :toggleSel="toggleSel"
-        :artists="artists" :folderCount="folderCount" />
+
+    <div class="tree-scroll">
+      <table class="mtbl">
+        <thead>
+          <tr>
+            <th style="width:30px"><input type="checkbox" class="tchk" :checked="isAllSel()" @change="toggleAll" /></th>
+            <th style="width:46px">封面</th>
+            <th>文件名</th>
+            <th>标题</th>
+            <th>艺术家</th>
+            <th>专辑</th>
+            <th>专辑艺术家</th>
+            <th style="width:52px">歌词</th>
+            <th style="width:46px">LRC</th>
+            <th style="width:56px">年份</th>
+            <th>风格</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="t in filtered" :key="t.id" :class="{ on: state.selected.has(t.id) }">
+            <td><input type="checkbox" class="tchk" :checked="state.selected.has(t.id)" @click.stop @change="toggleSel(t, $event)" /></td>
+            <td>
+              <img v-if="t.hasCover" class="cov" :src="coverUrl(t.id)" @click.stop="openTrack(t)" />
+              <span v-else class="covph">♪</span>
+            </td>
+            <td class="fn" @click="openTrack(t)" :title="t.path">{{ trackName(t) }}</td>
+            <td>{{ t.tags.TITLE || '' }}</td>
+            <td>{{ t.tags.ARTIST || '' }}</td>
+            <td>{{ t.tags.ALBUM || '' }}</td>
+            <td>{{ t.tags.ALBUMARTIST || '' }}</td>
+            <td>{{ hasLyrics(t) ? '有' : '无' }}</td>
+            <td>{{ hasLrc(t) ? '有' : '无' }}</td>
+            <td>{{ t.tags.DATE || '' }}</td>
+            <td>{{ t.tags.GENRE || '' }}</td>
+          </tr>
+          <tr v-if="!filtered.length"><td colspan="11" class="muted" style="padding:16px;text-align:center">还没有曲目，先在上方输入目录扫描。</td></tr>
+        </tbody>
+      </table>
     </div>
   </div>
 </template>
