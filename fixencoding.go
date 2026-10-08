@@ -11,7 +11,6 @@ import (
 
 	"golang.org/x/text/encoding/simplifiedchinese"
 
-	"LNH-musictag/internal/dedup"
 	"LNH-musictag/internal/model"
 	"LNH-musictag/internal/taglibx"
 )
@@ -183,7 +182,7 @@ func parseFileNameArtistTitle(fn string) (artist, title string) {
 // any mojibake it can detect. When a tag cannot be repaired (double-corrupted,
 // information lost) but the filename carries a clean "artist - title", the
 // artist/title tags fall back to the filename so the track stays readable.
-func fixEncodingHandler(s *store, fp dedup.Fingerprinter) http.HandlerFunc {
+func fixEncodingHandler(s *store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct{ IDs []string `json:"ids"` }
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -227,7 +226,7 @@ func fixEncodingHandler(s *store, fp dedup.Fingerprinter) http.HandlerFunc {
 			}
 			if len(m) > 0 {
 				if taglibx.WriteTags(t.Path, m, false) == nil {
-					refreshTrack(s, t.Path, fp)
+					refreshTrack(s, t.Path)
 				}
 			}
 			results = append(results, res{ID: t.ID, FileName: t.FileName, Changed: changed})

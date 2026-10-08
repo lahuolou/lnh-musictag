@@ -18,7 +18,8 @@ import (
 )
 
 // ReadTrack reads tags, audio properties and cover presence for a single file
-// and returns a model.Track with a SHA256 hash precomputed.
+// and returns a model.Track with a SHA256 hash precomputed (expensive: reads
+// the whole file). Prefer ReadTrackLight for scanning.
 func ReadTrack(path string) (*model.Track, error) {
 	st, err := os.Stat(path)
 	if err != nil {
@@ -39,22 +40,49 @@ func ReadTrack(path string) (*model.Track, error) {
 		return nil, err
 	}
 
+	tr := trackFrom(path, st, tags, props)
+	tr.SHA256 = hash
+	return tr, nil
+}
+
+// ReadTrackLight reads tags, audio properties and cover presence WITHOUT
+// hashing the file. It is the fast path used by scanning: a full-content
+// SHA256 for a large FLAC costs a full disk read per file and dominates scan
+// time. Hashing is deferred to the dedup page (see /api/duplicates), which
+// computes and caches it on demand.
+func ReadTrackLight(path string) (*model.Track, error) {
+	st, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+
+	tags, err := taglib.ReadTags(path)
+	if err != nil {
+		return nil, fmt.Errorf("read tags: %w", err)
+	}
+	props, err := taglib.ReadProperties(path)
+	if err != nil {
+		return nil, fmt.Errorf("read properties: %w", err)
+	}
+	return trackFrom(path, st, tags, props), nil
+}
+
+func trackFrom(path string, st os.FileInfo, tags map[string][]string, props taglib.Properties) *model.Track {
 	tr := &model.Track{
-		Path:      path,
-		FileName:  filepath.Base(path),
-		Ext:       filepath.Ext(path),
-		Size:      st.Size(),
-		SHA256:    hash,
-		Duration:  props.Length.Seconds(),
-		Bitrate:   props.BitRate,
+		Path:       path,
+		FileName:   filepath.Base(path),
+		Ext:        filepath.Ext(path),
+		Size:       st.Size(),
+		Duration:   props.Length.Seconds(),
+		Bitrate:    props.BitRate,
 		SampleRate: props.SampleRate,
-		Channels:  props.Channels,
-		HasCover:  len(props.Images) > 0,
+		Channels:   props.Channels,
+		HasCover:   len(props.Images) > 0,
 		HasLrcFile: LrcPath(path) != "",
-		Tags:      flatten(tags),
+		Tags:       flatten(tags),
 	}
 	tr.ID = pathID(path)
-	return tr, nil
+	return tr
 }
 
 // LrcPath returns the sibling .lrc lyric file path for an audio file
@@ -151,6 +179,13 @@ func flatten(tags map[string][]string) map[string]string {
 		}
 	}
 	return out
+}
+
+// HashFile returns the SHA256 hex digest of a file's full content. Used by the
+// dedup page for on-demand hashing; expensive for large files, so it is never
+// called during scanning.
+func HashFile(path string) (string, error) {
+	return sha256File(path)
 }
 
 func sha256File(path string) (string, error) {

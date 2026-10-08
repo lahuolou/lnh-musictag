@@ -38,6 +38,10 @@ onMounted(async () => {
       <span class="brand">🎵 LNH-MusicTag</span>
       <span class="spacer"></span>
       <span class="badge">曲目 {{ state.tracks.length }}</span>
+      <!-- 全局批量进度：后台任务进行中，任意页面可见，点击回到批量页 -->
+      <span v-if="state.batchJob && state.batchJob.status !== 'done'" class="badge batch" title="批量补全进行中，点击查看" @click="tab('batch')">
+        批量 {{ state.batchJob.done }}/{{ state.batchJob.total }}
+      </span>
       <button class="navlink" :title="theme === 'dark' ? '切换到白天模式' : '切换到黑夜模式'" @click="toggleTheme">{{ theme === 'dark' ? '🌙' : '☀️' }}</button>
       <button class="ghost sm" :class="{ on: state.activeTab !== 'settings' }" @click="tab('list')">列表</button>
       <button class="ghost sm" :class="{ on: state.activeTab === 'settings' }" @click="tab('settings')">设置</button>

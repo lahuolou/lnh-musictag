@@ -152,7 +152,7 @@ const t = cur;
         <div style="font-weight:600">{{ t().tags.TITLE || t().fileName }}</div>
         <div class="muted" style="font-size:13px">{{ t().path }}</div>
         <div class="muted" style="font-size:12px">
-          {{ fmtSize(t().size) }} · {{ fmtDur(t().duration) }} · {{ t().bitrate || '?' }} kbps · {{ t().sampleRate ? (t().sampleRate / 1000).toFixed(1) + ' kHz' : '' }} · SHA256: {{ t().sha256.slice(0, 20) }}…
+          {{ fmtSize(t().size) }} · {{ fmtDur(t().duration) }} · {{ t().bitrate || '?' }} kbps · {{ t().sampleRate ? (t().sampleRate / 1000).toFixed(1) + ' kHz' : '' }} · SHA256: {{ t().sha256 ? t().sha256.slice(0, 20) + '…' : '—（打开去重页后自动计算）' }}
         </div>
       </div>
     </div>

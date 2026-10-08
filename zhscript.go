@@ -8,7 +8,6 @@ import (
 
 	"github.com/liuzl/gocc"
 
-	"LNH-musictag/internal/dedup"
 	"LNH-musictag/internal/taglibx"
 )
 
@@ -64,7 +63,7 @@ func detectTraditional(tags map[string]string) bool {
 
 // convertScriptHandler converts the text fields of selected tracks between
 // simplified and traditional Chinese.
-func convertScriptHandler(s *store, fp dedup.Fingerprinter) http.HandlerFunc {
+func convertScriptHandler(s *store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			IDs []string `json:"ids"`
@@ -98,7 +97,7 @@ func convertScriptHandler(s *store, fp dedup.Fingerprinter) http.HandlerFunc {
 			}
 			if len(m) > 0 {
 				if taglibx.WriteTags(t.Path, m, false) == nil {
-					refreshTrack(s, t.Path, fp)
+					refreshTrack(s, t.Path)
 				}
 			}
 			results = append(results, res{ID: t.ID, FileName: t.FileName, Changed: changed})

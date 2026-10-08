@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"LNH-musictag/internal/dedup"
 	"LNH-musictag/internal/model"
 	"LNH-musictag/internal/scrape"
 	"LNH-musictag/internal/taglibx"
@@ -129,6 +128,10 @@ type scrapeJob struct {
 	Current string         `json:"current"`
 	Status  string         `json:"status"` // "running" | "done"
 	Results []scrapeResult `json:"results"`
+	// Updated carries tracks whose tags/cover changed since the last poll.
+	// Each progress poll consumes (clears) it so the UI can patch the list
+	// incrementally instead of reloading the whole list.
+	Updated []*model.Track `json:"updated"`
 	mu      sync.Mutex
 }
 
@@ -161,7 +164,7 @@ func (js *jobStore) get(id string) *scrapeJob {
 }
 
 // batchScrapeHandler starts a background job that scrapes the given track ids.
-func batchScrapeHandler(js *jobStore, store *store, ms *scrape.MultiSource, fp dedup.Fingerprinter) http.HandlerFunc {
+func batchScrapeHandler(js *jobStore, store *store, ms *scrape.MultiSource) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			IDs         []string `json:"ids"`
@@ -184,12 +187,13 @@ func batchScrapeHandler(js *jobStore, store *store, ms *scrape.MultiSource, fp d
 		}
 		fields := fieldsFromList(req.Fields, req.FetchCover, req.FetchLyrics)
 		job := js.create(len(req.IDs))
-		go runBatch(job, store, ms, fp, req.Source, req.IDs, fields, req.SkipFilled)
+		go runBatch(job, store, ms, req.Source, req.IDs, fields, req.SkipFilled)
 		writeJSON(w, http.StatusOK, map[string]any{"jobId": job.ID, "total": job.Total})
 	}
 }
 
-// jobProgressHandler returns the current state of a batch job.
+// jobProgressHandler returns the current state of a batch job. Updated tracks
+// are returned once and then cleared, so repeated polls deliver only the delta.
 func jobProgressHandler(js *jobStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		j := js.get(r.PathValue("id"))
@@ -198,12 +202,22 @@ func jobProgressHandler(js *jobStore) http.HandlerFunc {
 			return
 		}
 		j.mu.Lock()
-		defer j.mu.Unlock()
-		writeJSON(w, http.StatusOK, j)
+		out := scrapeJob{
+			ID:      j.ID,
+			Total:   j.Total,
+			Done:    j.Done,
+			Current: j.Current,
+			Status:  j.Status,
+			Results: append([]scrapeResult(nil), j.Results...),
+			Updated: j.Updated,
+		}
+		j.Updated = nil
+		j.mu.Unlock()
+		writeJSON(w, http.StatusOK, &out)
 	}
 }
 
-func runBatch(job *scrapeJob, store *store, ms *scrape.MultiSource, fp dedup.Fingerprinter, source string, ids []string, fields ScrapeFields, skipFilled bool) {
+func runBatch(job *scrapeJob, store *store, ms *scrape.MultiSource, source string, ids []string, fields ScrapeFields, skipFilled bool) {
 	defer func() {
 		job.mu.Lock()
 		job.Status = "done"
@@ -224,11 +238,20 @@ func runBatch(job *scrapeJob, store *store, ms *scrape.MultiSource, fp dedup.Fin
 		job.Current = t.FileName
 		job.mu.Unlock()
 
-		msg, ok := scrapeOneTrack(t, ms, source, fields, skipFilled, store, fp)
-		job.mu.Lock()
-		job.Results = append(job.Results, scrapeResult{ID: t.ID, FileName: t.FileName, OK: ok, Message: msg})
-		job.Done++
-		job.mu.Unlock()
+		msg, ok := scrapeOneTrack(t, ms, source, fields, skipFilled, store)
+		// 完成后把最新曲目快照加入增量队列（前端据此实时更新列表，不整表刷新）
+		if nt := store.get(t.ID); nt != nil {
+			job.mu.Lock()
+			job.Updated = append(job.Updated, nt)
+			job.Results = append(job.Results, scrapeResult{ID: t.ID, FileName: t.FileName, OK: ok, Message: msg})
+			job.Done++
+			job.mu.Unlock()
+		} else {
+			job.mu.Lock()
+			job.Results = append(job.Results, scrapeResult{ID: t.ID, FileName: t.FileName, OK: ok, Message: msg})
+			job.Done++
+			job.mu.Unlock()
+		}
 
 		if multi {
 			time.Sleep(1100 * time.Millisecond) // respect source rate limits
@@ -242,7 +265,7 @@ func runBatch(job *scrapeJob, store *store, ms *scrape.MultiSource, fp dedup.Fin
 // fields the track already carries are left untouched (smart skip to save
 // hardware); if nothing needs filling, the track is skipped without searching.
 // Returns (message, ok).
-func scrapeOneTrack(t *model.Track, ms *scrape.MultiSource, source string, fields ScrapeFields, skipFilled bool, store *store, fp dedup.Fingerprinter) (string, bool) {
+func scrapeOneTrack(t *model.Track, ms *scrape.MultiSource, source string, fields ScrapeFields, skipFilled bool, store *store) (string, bool) {
 	if skipFilled {
 		// Drop already-filled fields; if nothing remains, skip without searching.
 		if !applySkipFilled(t, &fields) {
@@ -309,7 +332,7 @@ func scrapeOneTrack(t *model.Track, ms *scrape.MultiSource, source string, field
 			taglibx.WriteCover(t.Path, img)
 		}
 	}
-	refreshTrack(store, t.Path, fp)
+	refreshTrack(store, t.Path)
 
 	var wrote []string
 	if fields.Title {

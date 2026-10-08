@@ -10,8 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-
-	"LNH-musictag/internal/dedup"
 )
 
 // convertCodecs maps target extension -> ffmpeg audio codec args.
@@ -32,7 +30,7 @@ var convertCodecs = map[string]string{
 var losslessCodecs = map[string]bool{"flac": true, "wav": true, "aiff": true, "tta": true}
 
 // convertHandler transcodes selected tracks to a target format.
-func convertHandler(s *store, fp dedup.Fingerprinter) http.HandlerFunc {
+func convertHandler(s *store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			IDs          []string `json:"ids"`
@@ -100,7 +98,7 @@ func convertHandler(s *store, fp dedup.Fingerprinter) http.HandlerFunc {
 				s.remove(t.ID)
 				os.Remove(t.Path)
 			}
-			refreshTrack(s, dst, fp)
+			refreshTrack(s, dst)
 			results = append(results, res{ID: t.ID, Before: t.FileName, After: filepath.Base(dst), OK: true})
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"total": len(results), "results": results})

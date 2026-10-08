@@ -1,10 +1,9 @@
 <script setup>
 import { reactive, ref } from 'vue'
-import { state, toast, refresh } from '../store.js'
+import { state, toast, refresh, startBatchPoll } from '../store.js'
 import { api } from '../api.js'
 import FormatDialog from './FormatDialog.vue'
 
-const prog = ref(null)
 const skipFilled = ref(true)
 const fmtOpen = ref(false)
 
@@ -72,7 +71,7 @@ async function startBatch() {
   const names = selectedFieldNames();
   if (names.length === 0) { toast('请至少勾选一个要补全的字段', 'err'); return; }
   state.batchBusy = true;
-  prog.value = null;
+  state.batchJob = null;
   try {
     const r = await api('/api/scrape/batch', {
       method: 'POST',
@@ -81,34 +80,12 @@ async function startBatch() {
         fields: names, skipFilled: skipFilled.value
       })
     });
-    showProgress(r.jobId);
+    // 全局轮询：后台运行、任意页面可见进度，并增量合并列表（不整表刷新）
+    startBatchPoll(r.jobId);
   } catch (e) {
     toast('批量刮削启动失败: ' + e.message, 'err');
     state.batchBusy = false;
   }
-}
-
-function showProgress(jobId) {
-  const tick = async () => {
-    try {
-      const j = await api('/api/scrape/jobs/' + encodeURIComponent(jobId));
-      prog.value = j;
-      if (j.status === 'done') {
-        state.batchBusy = false;
-        const ok = (j.results || []).filter(r => r.ok).length;
-        const skipped = (j.results || []).filter(r => r.ok && /智能跳过/.test(r.message || '')).length;
-        toast('批量刮削完成：' + ok + '/' + j.total + ' 成功' + (skipped ? '（智能跳过 ' + skipped + '）' : ''), ok === j.total ? 'ok' : 'err');
-        state.selected.clear();
-        await refresh();
-        return;
-      }
-      setTimeout(tick, 1000);
-    } catch (e) {
-      toast('查询进度失败: ' + e.message, 'err');
-      state.batchBusy = false;
-    }
-  };
-  tick();
 }
 </script>
 
@@ -140,15 +117,15 @@ function showProgress(jobId) {
     <button :disabled="state.batchBusy" @click="startBatch">批量补全 ({{ state.selected.size }})</button>
   </div>
 
-  <div v-if="prog" style="margin-top:12px">
-    <div class="progbar"><div class="progfill" :style="{ width: (prog.total ? Math.round(prog.done / prog.total * 100) : 0) + '%' }"></div></div>
+  <div v-if="state.batchJob" style="margin-top:12px">
+    <div class="progbar"><div class="progfill" :style="{ width: (state.batchJob.total ? Math.round(state.batchJob.done / state.batchJob.total * 100) : 0) + '%' }"></div></div>
     <div class="muted">
-      {{ prog.status === 'done'
-        ? ('完成：' + prog.results.filter(r => r.ok).length + '/' + prog.total + ' 成功')
-        : ('进度 ' + prog.done + '/' + prog.total + ' · ' + (prog.current || '处理中…')) }}
+      {{ state.batchJob.status === 'done'
+        ? ('完成：' + state.batchJob.results.filter(r => r.ok).length + '/' + state.batchJob.total + ' 成功')
+        : ('进度 ' + state.batchJob.done + '/' + state.batchJob.total + ' · ' + (state.batchJob.current || '处理中…')) }}
     </div>
-    <div v-if="prog.status === 'done' && prog.results.some(r => !r.ok && r.message)" class="err" style="white-space:pre-wrap">
-      <div v-for="(r, i) in prog.results.filter(x => !x.ok && x.message)" :key="i">{{ r.fileName }}: {{ r.message }}</div>
+    <div v-if="state.batchJob.status === 'done' && state.batchJob.results.some(r => !r.ok && r.message)" class="err" style="white-space:pre-wrap">
+      <div v-for="(r, i) in state.batchJob.results.filter(x => !x.ok && x.message)" :key="i">{{ r.fileName }}: {{ r.message }}</div>
     </div>
   </div>
 

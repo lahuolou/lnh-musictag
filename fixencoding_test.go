@@ -108,12 +108,6 @@ func TestDetectTraditional(t *testing.T) {
 	}
 }
 
-// noopFP implements dedup.Fingerprinter for tests.
-type noopFP struct{}
-
-func (noopFP) Available() bool                        { return false }
-func (noopFP) Fingerprint(string) (string, error)     { return "", nil }
-
 func TestFixEncodingHandlerFilenameFallback(t *testing.T) {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		t.Skip("ffmpeg 不可用，跳过集成测试")
@@ -144,7 +138,7 @@ func TestFixEncodingHandlerFilenameFallback(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{"ids": []string{tr.ID}})
 	req := httptest.NewRequest(http.MethodPost, "/api/fix-encoding", strings.NewReader(string(body)))
 	w := httptest.NewRecorder()
-	fixEncodingHandler(s, noopFP{})(w, req)
+	fixEncodingHandler(s)(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("handler 状态码 %d", w.Code)
 	}

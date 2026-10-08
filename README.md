@@ -12,11 +12,11 @@
 |---|---|---|
 | ① 标签读写 | `go.senan.xyz/taglib`（WASM，无 CGo，MP3/FLAC/M4A/OGG/WAV/WMA…），多值标签、内嵌封面 | 写标题/艺术家/专辑/专辑艺术家/流派/年份/曲目号/封面/歌词 |
 | ② 异步扫描 | `/api/scan` 后台任务，**边扫边入库**；前端轮询 `/api/scan/status` 增量渲染曲目，不等全部扫完 | 扫描期间即见曲目 |
-| ③ 歌曲去重 | SHA256 文件哈希（默认）+ 音频指纹（可插拔）+ **同名多格式**（同名不同格式保留音质最佳）+ **艺术家+标题**（同歌不同名） | 去重页 |
+| ③ 歌曲去重 | SHA256 文件哈希（**打开去重页时按需计算并缓存**）+ **同名多格式**（同名不同格式保留音质最佳）+ **艺术家+标题**（同歌不同名） | 去重页 |
 | ④ 多源刮削 | **10 个源**：网易云 / QQ / 酷狗 / 酷我 / 咪咕 / 哔哩哔哩 / 汽水 / 波点（国内）＋ MusicBrainz / iTunes（国际），**国内源优先** | 搜索/应用，自动依次尝试 |
 | ⑤ 补全元数据 | MusicBrainz release 详情回填**专辑艺术家、流派、年代、曲目号**；写入标签 | 批量/单曲刮削均可 |
 | ⑥ 歌词 | 网易云 LRC + lrclib，自动选择 | 单曲获取/编辑/保存，批量「含歌词」 |
-| ⑦ 批量 | 勾选曲目 → 批量刮削；**字段可选**（海报/歌名/艺术家/流派/年代/专辑艺术家/曲目号/歌词），**智能跳过**已有标签的曲目 | 批量页 |
+| ⑦ 批量 | 勾选曲目 → 批量刮削；**字段可选**（海报/歌名/艺术家/流派/年代/专辑艺术家/曲目号/歌词），**智能跳过**已有标签的曲目；**后台运行**：切页进度仍可见（顶栏进度徽标），每完成一首**列表实时增量更新**（不整表刷新、不打断勾选/滚动） | 批量页 |
 | ⑧ 去后缀默认执行 | ① 文件重命名：扫描时按**真实编码格式**（读文件头魔数）去重复/错误音频后缀，`发如雪.mp3.flac → 发如雪.flac`、`发如雪.mp3.mp3 → 发如雪.mp3`；② 标签标题去后缀 `广岛之恋.mp3 → 广岛之恋` | 均默认开启，可在设置关闭 |
 | ⑨ 配置存数据库 | 账号/密码/API Key/选项存 `SQLite`（`/config/lnh.db`），不再用环境变量 | 设置页读写 |
 | ⑩ 列表搜索 | 左侧音乐列表实时搜索：标题/艺术家/专辑/文件名 | 本地过滤 |
@@ -27,7 +27,7 @@
 | ⑮ 列表筛选 | 搜索框 **输入即过滤**（无搜索按钮）+ 快捷筛选：**乱码 / 繁体 / 无歌词 / 无封面 / 无艺术家** | 列表页 |
 | ⑯ 乱码修复 | 自动还原 GBK/UTF-8 错读的中文标签（标题/艺术家/专辑等） | 批量面板 |
 | ⑰ 简繁体转换 | 标签文本 简体⇄繁体（OpenCC 引擎） | 批量面板 |
-| ⑱ 智能扫描 | 已知文件**智能跳过**（不重复读标签/算哈希）；扫描中可**暂停/继续**；扫描进度显示已加载/发现/跳过数 | 列表页 |
+| ⑱ 智能扫描 | 已知文件**智能跳过**；扫描**只读标签不哈希**（SHA256 按需在去重页计算），全量扫描速度接近同类工具；扫描中可**暂停/继续**；扫描进度显示已加载/发现/跳过数 | 列表页 |
 | ⑲ 保存即重命名 | 编辑页默认从源文件名载入标题/艺术家（`陈小春 - 街角的晚风.flac` → 艺术家=陈小春、标题=街角的晚风）；保存标签时若标题/艺术家与文件名不符，自动把文件重命名为 **`艺术家 - 标题.后缀`** | 编辑页 |
 | ⑳ 合唱整理 | 艺术家字段按 `/ ; 、 ， _` 拆分后 **超过 3 位 → 一键改为“合唱”** | 批量面板 |
 | ㉑ 去重增强 | 去重新增 **艺术家+标题** 维度分组；每个分组勾选多选、**手动删除**（默认保留最佳音质，绝不自动删） | 去重页 |
@@ -90,7 +90,7 @@ docker pull ghcr.io/lahuolou/lnh-musictag:latest && docker restart lnh-musictag 
 注意事项：
 - 音乐卷**必须可读写**（应用会把标签/封面/歌词写回文件），compose 里默认就是读写，别改成 `:ro`。
 - 配置卷 `lnh_config:/config` 保存数据库（密码/Key/选项）与扫描进度，重启不丢失。
-- 可选启用 AcoustID 指纹识别：在「设置」页填 API Key（也可用 compose 环境变量做首次种子）。
+- 可选填 MusicBrainz/AcoustID API Key（「设置」页，或用 compose 环境变量首次种子），提升国际源匹配；不填也能用文本搜索。
 - 关闭：`docker compose down`；查看日志：`docker compose logs -f`。
 
 ## 项目结构
@@ -103,13 +103,15 @@ LNH-musictag/
   main.go                 # HTTP 服务、路由、内存存储、异步扫描、多源 handler、embed dist
   auth.go                 # 登录鉴权、随机初始密码（数据库）、改密
   helpers.go              # base64 / 远程抓取 / 循环去后缀
-  scrapejob.go            # 批量刮削后台任务（进度 + 元数据补全）
+  fixencoding.go          # 乱码修复（多轮编码还原 + 文件名回退）
+  zhscript.go             # 简繁转换 + 繁体检测（OpenCC）
+  scrapejob.go            # 批量刮削后台任务（进度 + 增量推送 + 元数据补全）
   internal/
     model/                # Track / DuplicateGroup
     store/config.go       # SQLite 配置存储（账号/密码/Key/选项）
     audiofmt/             # 文件头魔数检测真实音频编码格式（文件重命名用）
     taglibx/              # 标签读写封装（go-taglib，含 LYRICS 歌词）
-    dedup/                # SHA256 去重 + Fingerprinter 接口
+    dedup/                # SHA256 / 同名多格式 / 艺术家+标题 去重分组
     scrape/               # 10 个源：sources/netease/qq/kugou/kuwo/migu/bilibili/qishui/bodian/musicbrainz/itunes + lyrics
   web/                    # Vue3 + Vite 前端（构建产物 dist 被 go:embed 编译进二进制）
     src/
@@ -156,9 +158,7 @@ LNH-musictag/
 | GET | `/api/tracks/{id}/lrcfile` | 读同目录外挂 `.lrc` 歌词 |
 | POST | `/api/tracks/{id}/tags` | `{tags,clear}` 写标签（含 `LYRICS`）；标题/艺术家与文件名不符时自动重命名为 `艺术家 - 标题.后缀` |
 | POST | `/api/tracks/{id}/cover` | `{url\|dataBase64\|clear}` 写封面 |
-| POST | `/api/tracks/fix-title` | `{ids}` 批量去音频后缀标题（默认全部） |
-| POST | `/api/rename-files` | `{ids}` 重命名文件：去重复/错误音频后缀（校验真实编码），`发如雪.mp3.flac→发如雪.flac` |
-| GET | `/api/duplicates` | 重复分组（hash + fingerprint + format + tags） |
+| GET | `/api/duplicates` | 重复分组（hash + format + tags）；缺失的 SHA256 在此按需计算并缓存 |
 | POST | `/api/duplicates/remove` | `{ids}` 手动删除选中的重复文件 |
 | POST | `/api/set-chorus` | `{ids}` 艺术家>3 位 → 改“合唱” |
 | POST | `/api/fix-encoding` | `{ids}` 乱码标签修复（GBK/UTF-8） |
@@ -178,5 +178,4 @@ LNH-musictag/
 - 服务监听 `:10248`，经 compose 映射到宿主 `10248`，局域网内可访问。
 - **刮削源各有速率限制**（MusicBrainz ~1 请求/秒）；批量刮削逐曲间已内置 1.1s 节流。
 - 汽水/波点依赖第三方接口，可能被反爬拦截或失效，`auto` 会自动跳过。
-- AcoustID 指纹识别需在「设置」页填 API Key；默认走文本搜索，无需 key。
 - 封面写入对 WAV 等容器依赖 TagLib 支持；主流 MP3/FLAC/M4A 均支持。

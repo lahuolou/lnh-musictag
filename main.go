@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -71,6 +72,59 @@ func (s *store) get(id string) *model.Track {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.tracks[id]
+}
+
+func (s *store) byPathID(path string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.byPath[path]
+}
+
+// ensureHashes computes and caches SHA256 for tracks that lack one (scanned
+// with the light read). Hashing is I/O heavy, so it runs on a small worker
+// pool and each file is hashed at most once per process.
+func (s *store) ensureHashes(tracks []*model.Track) {
+	type job struct{ t *model.Track }
+	var jobs []*model.Track
+	s.mu.RLock()
+	for _, t := range tracks {
+		if t.SHA256 == "" {
+			jobs = append(jobs, t)
+		}
+	}
+	s.mu.RUnlock()
+	if len(jobs) == 0 {
+		return
+	}
+	workers := runtime.NumCPU()
+	if workers > 8 {
+		workers = 8
+	}
+	if workers < 2 {
+		workers = 2
+	}
+	ch := make(chan *model.Track)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for t := range ch {
+				if h, err := taglibx.HashFile(t.Path); err == nil && h != "" {
+					s.mu.Lock()
+					if cur := s.tracks[t.ID]; cur != nil && cur.SHA256 == "" {
+						cur.SHA256 = h
+					}
+					s.mu.Unlock()
+				}
+			}
+		}()
+	}
+	for _, t := range jobs {
+		ch <- t
+	}
+	close(ch)
+	wg.Wait()
 }
 
 func (s *store) exists(path string) bool {
@@ -138,7 +192,7 @@ type scanManager struct {
 
 func newScanManager() *scanManager { return &scanManager{} }
 
-func (sm *scanManager) start(store *store, dir string, fp dedup.Fingerprinter, autoFix, autoRename bool) error {
+func (sm *scanManager) start(store *store, dir string, autoFix, autoRename bool) error {
 	sm.mu.Lock()
 	if sm.state != nil && sm.state.snapshot().Running {
 		sm.mu.Unlock()
@@ -148,7 +202,7 @@ func (sm *scanManager) start(store *store, dir string, fp dedup.Fingerprinter, a
 	sm.state = st
 	sm.mu.Unlock()
 	go func() {
-		added, err := scanDirLive(store, dir, fp, st, autoFix, autoRename)
+		added, err := scanDirLive(store, dir, st, autoFix, autoRename)
 		st.mu.Lock()
 		st.Running = false
 		st.Added = added
@@ -195,13 +249,6 @@ func main() {
 		ms.Client().AcoustIDAPIKey = k
 	}
 
-	// Optional fingerprint engine (fpcalc from Chromaprint). Noop if absent.
-	var fingerprinter dedup.Fingerprinter = dedup.FpcalcFingerprinter{Bin: "fpcalc"}
-	if !fingerprinter.Available() {
-		fingerprinter = dedup.NoopFingerprinter{}
-		log.Println("fingerprint engine (fpcalc) not found; dedup uses SHA256 only")
-	}
-
 	adminUser, adminPass, generated, err := bootstrapAdmin(cfg, os.Getenv("LNH_ADMIN_USER"), os.Getenv("LNH_ADMIN_PASS"))
 	if err != nil {
 		log.Fatalf("init admin: %v", err)
@@ -218,16 +265,14 @@ func main() {
 
 	pm := http.NewServeMux()
 	pm.HandleFunc("POST /api/change-password", sessions.changePasswordHandler)
-	pm.HandleFunc("POST /api/scrape/batch", batchScrapeHandler(jobs, store, ms, fingerprinter))
+	pm.HandleFunc("POST /api/scrape/batch", batchScrapeHandler(jobs, store, ms))
 	pm.HandleFunc("GET /api/scrape/jobs/{id}", jobProgressHandler(jobs))
 	pm.HandleFunc("GET /api/scrape/sources", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, ms.Sources())
 	})
-	pm.HandleFunc("POST /api/tracks/fix-title", fixTitleHandler(store, fingerprinter))
-	pm.HandleFunc("POST /api/rename-files", renameFilesHandler(store, fingerprinter))
-	pm.HandleFunc("POST /api/convert", convertHandler(store, fingerprinter))
-	pm.HandleFunc("POST /api/fix-encoding", fixEncodingHandler(store, fingerprinter))
-	pm.HandleFunc("POST /api/convert-script", convertScriptHandler(store, fingerprinter))
+	pm.HandleFunc("POST /api/convert", convertHandler(store))
+	pm.HandleFunc("POST /api/fix-encoding", fixEncodingHandler(store))
+	pm.HandleFunc("POST /api/convert-script", convertScriptHandler(store))
 	mux.Handle("/api/", sessions.requireAuth(pm))
 
 	// Static UI (Vue SPA built into web/dist; /api/... routes win over this)
@@ -251,7 +296,7 @@ func main() {
 		}
 		autoFix := cfg.GetDefault("auto_fix_title", "1") == "1"
 		autoRename := cfg.GetDefault("auto_rename_file", "1") == "1"
-		if err := scans.start(store, dir, fingerprinter, autoFix, autoRename); err != nil {
+		if err := scans.start(store, dir, autoFix, autoRename); err != nil {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 			return
 		}
@@ -307,7 +352,7 @@ func main() {
 			r := res{ID: t.ID, FileName: t.FileName, Before: artist}
 			if len(uniq) > 3 {
 				if err := taglibx.WriteTags(t.Path, map[string][]string{taglibx.Artist: {"合唱"}}, false); err == nil {
-					refreshTrack(store, t.Path, fingerprinter)
+					refreshTrack(store, t.Path)
 					r.Changed = true
 					r.Message = "→ 合唱（原 " + strconv.Itoa(len(uniq)) + " 位）"
 				} else {
@@ -382,10 +427,10 @@ func main() {
 	// Duplicates (hash-based, plus fingerprint if available)
 	pm.HandleFunc("GET /api/duplicates", func(w http.ResponseWriter, r *http.Request) {
 		tracks := store.all()
+		// SHA256 按需计算：扫描时不哈希（快），打开去重页时才对缺失的
+		// 曲目并发计算一次并缓存回 store。
+		store.ensureHashes(tracks)
 		groups := dedup.GroupByHash(tracks)
-		if fingerprinter.Available() {
-			groups = append(groups, dedup.GroupByFingerprint(tracks)...)
-		}
 		groups = append(groups, dedup.GroupBySameName(tracks)...)
 		groups = append(groups, dedup.GroupByArtistTitle(tracks)...)
 		writeJSON(w, http.StatusOK, groups)
@@ -427,6 +472,8 @@ func main() {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "no cover"})
 			return
 		}
+		// 不缓存：批量刮削写入新封面后，列表封面图需立即刷新
+		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Content-Type", http.DetectContentType(img))
 		w.Write(img)
 	})
@@ -495,7 +542,7 @@ func main() {
 					if _, serr := os.Stat(newPath); serr != nil {
 						if rerr := os.Rename(t.Path, newPath); rerr == nil {
 							store.removeByPath(t.Path)
-							refreshTrack(store, newPath, fingerprinter)
+							refreshTrack(store, newPath)
 							renamed = true
 							newName = filepath.Base(newPath)
 						}
@@ -504,7 +551,7 @@ func main() {
 			}
 		}
 		if !renamed {
-			refreshTrack(store, t.Path, fingerprinter)
+			refreshTrack(store, t.Path)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": "written", "renamed": renamed, "name": newName})
 	})
@@ -551,7 +598,7 @@ func main() {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		refreshTrack(store, t.Path, fingerprinter)
+		refreshTrack(store, t.Path)
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "cover written"})
 	})
 
@@ -682,7 +729,7 @@ func main() {
 				taglibx.WriteCover(t.Path, img)
 			}
 		}
-		refreshTrack(store, t.Path, fingerprinter)
+		refreshTrack(store, t.Path)
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "scraped"})
 	})
 
@@ -712,7 +759,7 @@ var skipScanDirs = map[string]bool{
 	"node_modules": true, "$recycle.bin": true, ".git": true, ".svn": true,
 }
 
-func scanDirLive(s *store, dir string, fp dedup.Fingerprinter, st *scanState, autoFix, autoRename bool) (int, error) {
+func scanDirLive(s *store, dir string, st *scanState, autoFix, autoRename bool) (int, error) {
 	st0, err := os.Stat(dir)
 	if err != nil {
 		return 0, fmt.Errorf("cannot access %q: %w", dir, err)
@@ -764,7 +811,7 @@ func scanDirLive(s *store, dir string, fp dedup.Fingerprinter, st *scanState, au
 				path = np
 			}
 		}
-		t, terr := taglibx.ReadTrack(path)
+		t, terr := taglibx.ReadTrackLight(path)
 		if terr != nil {
 			st.mu.Lock()
 			st.Done++
@@ -779,13 +826,8 @@ func scanDirLive(s *store, dir string, fp dedup.Fingerprinter, st *scanState, au
 			}
 			if fixed := stripAudioExt(title); fixed != title {
 				if taglibx.WriteTags(path, map[string][]string{taglibx.Title: {fixed}}, false) == nil {
-					t, _ = taglibx.ReadTrack(path)
+					t, _ = taglibx.ReadTrackLight(path)
 				}
-			}
-		}
-		if fp.Available() {
-			if f, ferr := fp.Fingerprint(path); ferr == nil {
-				t.Fingerprint = f
 			}
 		}
 		if !s.exists(path) {
@@ -808,68 +850,17 @@ func (s *store) allTracksCount() int {
 	return len(s.tracks)
 }
 
-// fixTitleHandler strips trailing audio extensions from track titles in batch.
-func fixTitleHandler(s *store, fp dedup.Fingerprinter) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			IDs []string `json:"ids"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-		var list []*model.Track
-		if len(req.IDs) == 0 {
-			list = s.all()
-		} else {
-			for _, id := range req.IDs {
-				if t := s.get(id); t != nil {
-					list = append(list, t)
-				}
-			}
-		}
-		type fixRes struct {
-			ID       string `json:"id"`
-			FileName string `json:"fileName"`
-			Fixed    bool   `json:"fixed"`
-			Before   string `json:"before"`
-			After    string `json:"after"`
-		}
-		results := []fixRes{}
-		for _, t := range list {
-			title := strings.TrimSpace(t.Tags["TITLE"])
-			if title == "" {
-				title = t.FileName
-			}
-			fixed := stripAudioExt(title)
-			res := fixRes{ID: t.ID, FileName: t.FileName, Before: title, Fixed: fixed != title}
-			if fixed != title {
-				m := map[string][]string{taglibx.Title: {fixed}}
-				if err := taglibx.WriteTags(t.Path, m, false); err == nil {
-					refreshTrack(s, t.Path, fp)
-					res.After = fixed
-				} else {
-					res.Fixed = false
-					res.After = ""
-					res.Before = "写标签失败: " + err.Error()
-				}
-			}
-			results = append(results, res)
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"total": len(results), "fixed": results})
-	}
-}
-
 // refreshTrack re-reads a track's tags/properties after a write.
-func refreshTrack(s *store, path string, fp dedup.Fingerprinter) {
-	t, err := taglibx.ReadTrack(path)
+// Uses the light read (no full-file hash): SHA256 is computed lazily on the
+// dedup page and cached back into the store.
+func refreshTrack(s *store, path string) {
+	t, err := taglibx.ReadTrackLight(path)
 	if err != nil {
 		return
 	}
-	if fp.Available() {
-		if f, ferr := fp.Fingerprint(path); ferr == nil {
-			t.Fingerprint = f
-		}
+	// 保留已有的内容哈希（若有），避免刷新标签后哈希丢失
+	if old := s.get(s.byPathID(path)); old != nil {
+		t.SHA256 = old.SHA256
 	}
 	t.HasTrad = detectTraditional(t.Tags)
 	s.mu.Lock()
@@ -880,54 +871,6 @@ func refreshTrack(s *store, path string, fp dedup.Fingerprinter) {
 		s.order[t.ID] = s.seq
 	}
 	s.mu.Unlock()
-}
-
-// renameFilesHandler renames selected (or all) tracks so their filename keeps
-// only the real encoding extension, e.g. "发如雪.mp3.flac" -> "发如雪.flac".
-func renameFilesHandler(s *store, fp dedup.Fingerprinter) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			IDs []string `json:"ids"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-		var list []*model.Track
-		if len(req.IDs) == 0 {
-			list = s.all()
-		} else {
-			for _, id := range req.IDs {
-				if t := s.get(id); t != nil {
-					list = append(list, t)
-				}
-			}
-		}
-		type res struct {
-			ID      string `json:"id"`
-			Before  string `json:"before"`
-			After   string `json:"after"`
-			Renamed bool   `json:"renamed"`
-			Error   string `json:"error,omitempty"`
-		}
-		results := []res{}
-		for _, t := range list {
-			np, err := renameCleanFile(t.Path)
-			if err != nil {
-				results = append(results, res{ID: t.ID, Before: t.FileName, Renamed: false, Error: err.Error()})
-				continue
-			}
-			if np == t.Path {
-				results = append(results, res{ID: t.ID, Before: t.FileName, Renamed: false})
-				continue
-			}
-			// Re-register the track under its new path (its id derives from path).
-			s.remove(t.ID)
-			refreshTrack(s, np, fp)
-			results = append(results, res{ID: t.ID, Before: t.FileName, After: filepath.Base(np), Renamed: true})
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"total": len(results), "results": results})
-	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

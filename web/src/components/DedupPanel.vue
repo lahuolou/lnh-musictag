@@ -15,7 +15,6 @@ function fileInfo(id) {
 
 const methodMeta = {
   hash: { cls: 'hash', label: 'SHA256（内容相同）' },
-  fingerprint: { cls: 'fp', label: '指纹（同录音）' },
   format: { cls: 'src', label: '格式（同名多格式）' },
   tags: { cls: 'src', label: '艺术家+标题（同歌不同名）' }
 };
