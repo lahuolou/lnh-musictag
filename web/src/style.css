@@ -10,6 +10,7 @@
   --ok:#168a43; --warn:#b9790f; --err:#d33737;
 }
 .field-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(126px,1fr));gap:8px 12px}
+.h3{font-weight:600;font-size:14px;margin:0 0 4px}
 /* 单列竖排：顶部功能 tab + 主区整列音乐列表 */
 .page{max-width:1200px;margin:0 auto;padding:16px 20px}
 .pagebody{min-height:70vh}

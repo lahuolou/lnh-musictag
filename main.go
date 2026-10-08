@@ -203,6 +203,9 @@ func main() {
 	})
 	pm.HandleFunc("POST /api/tracks/fix-title", fixTitleHandler(store, fingerprinter))
 	pm.HandleFunc("POST /api/rename-files", renameFilesHandler(store, fingerprinter))
+	pm.HandleFunc("POST /api/convert", convertHandler(store, fingerprinter))
+	pm.HandleFunc("POST /api/fix-encoding", fixEncodingHandler(store, fingerprinter))
+	pm.HandleFunc("POST /api/convert-script", convertScriptHandler(store, fingerprinter))
 	mux.Handle("/api/", sessions.requireAuth(pm))
 
 	// Static UI (Vue SPA built into web/dist; /api/... routes win over this)

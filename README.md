@@ -22,7 +22,10 @@
 | ⑩ 列表搜索 | 左侧音乐列表实时搜索：标题/艺术家/专辑/文件名 | 本地过滤 |
 | ⑪ 主题切换 | 黑/白天模式，现代扁平化风格，随偏好记忆 | 顶栏 🌙/☀️ |
 | ⑫ 语言优选源 | 自动源按语言排序：中文→QQ/网易云等国内源优先，外文→iTunes/MusicBrainz 等国际源优先 | auto 源 |
-| ⑬ 整合布局 | 单页：**左侧树形音乐列表**（目录→专辑→曲目，可折叠、可勾选）+ **右侧功能区**（编辑/批量/去重/设置 tab） | 一体化界面 |
+| ⑬ 整合布局 | 单页：**整列竖排音乐列表**（目录→曲目，checkbox+图标+文件名，纵向滚动）+ **顶部功能 tab**（列表/编辑/批量/去重/设置） | 一体化界面 |
+| ⑭ 格式转换 | ffmpeg 转码为 mp3/flac/m4a/ogg/opus/wav，保留标签，可选删除原文件 | 批量面板 · ffmpeg |
+| ⑮ 乱码修复 | 自动还原 GBK/UTF-8 错读的中文标签（标题/艺术家/专辑等） | 批量面板 |
+| ⑯ 简繁体转换 | 标签文本 简体⇄繁体（OpenCC 引擎） | 批量面板 |
 
 ## 快速开始（Docker）
 
@@ -57,7 +60,7 @@ docker compose up -d
 
 ```
 LNH-musictag/
-  Dockerfile              # 多阶段：node 构建前端 → Go 静态编译 → scratch
+  Dockerfile              # 多阶段：node 构建前端 → Go 静态编译 → alpine + ffmpeg（格式转换）
   docker-compose.yml      # 端口 10248、音乐卷、配置卷
   .dockerignore
   main.go                 # HTTP 服务、路由、内存存储、异步扫描、多源 handler、embed dist
