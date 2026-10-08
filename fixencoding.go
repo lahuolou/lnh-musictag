@@ -4,6 +4,7 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -50,7 +51,9 @@ func cjkCount(s string) int {
 // fixMojibake attempts to repair garbled Chinese tags caused by GBK/UTF-8
 // encoding mixups. It scores each candidate by how much it looks like clean
 // Chinese (more CJK, fewer non-CJK chars) and keeps the best, so already-good
-// text is left untouched and only genuine mojibake is rewritten.
+// text is left untouched and only genuine mojibake is rewritten. It also tries
+// double-pass chains (e.g. GBK->UTF8->GBK->UTF8) that produce the classic
+// "锟斤拷" corruption.
 func fixMojibake(s string) string {
 	if s == "" {
 		return s
@@ -83,8 +86,10 @@ func fixMojibake(s string) string {
 	// 含非 Latin-1 字符：尝试 GBK/UTF-8 错读还原，按得分取最优。
 	best, bestScore := s, score(s)
 	try := func(c string) {
-		if sc := score(c); sc > bestScore {
-			best, bestScore = c, sc
+		if c != "" && c != s && utf8.ValidString(c) && !strings.ContainsRune(c, '\uFFFD') {
+			if sc := score(c); sc > bestScore {
+				best, bestScore = c, sc
+			}
 		}
 	}
 	// 情形 A：UTF-8 字节被按 GBK 读出（"浣犲ソ"）→ 再编码为 GBK、按 UTF-8 解码
@@ -94,6 +99,17 @@ func fixMojibake(s string) string {
 	// 情形 B：GBK 字节被按 UTF-8 读出 → 按 GBK 解码
 	if b, err := simplifiedchinese.GBK.NewDecoder().Bytes([]byte(s)); err == nil {
 		try(string(b))
+	}
+	// 双重链：s -> GBK 编码 -> UTF-8 解码（串含 FFFD）-> 再 GBK 编码 -> UTF-8 解码
+	// 覆盖"锟斤拷"类二次损坏（中间有替换字符丢失，能还原的大部分仍可救回）。
+	if b1, err := simplifiedchinese.GBK.NewEncoder().Bytes([]byte(s)); err == nil {
+		if mid, err2 := simplifiedchinese.GBK.NewDecoder().Bytes(b1); err2 == nil {
+			if b2, err3 := simplifiedchinese.GBK.NewEncoder().Bytes(mid); err3 == nil {
+				if out, err4 := simplifiedchinese.GBK.NewDecoder().Bytes(b2); err4 == nil {
+					try(string(out))
+				}
+			}
+		}
 	}
 	return best
 }
@@ -111,8 +127,62 @@ func latinBytesOf(s string) ([]byte, bool) {
 	return out, true
 }
 
+// looksGarbled reports whether a text field shows typical mojibake markers:
+// replacement chars, Latin-1 misread characters, bopomofo or geometric symbols
+// that never appear in a clean Chinese tag.
+func looksGarbled(s string) bool {
+	if s == "" {
+		return false
+	}
+	if strings.ContainsRune(s, '\uFFFD') {
+		return true
+	}
+	for _, r := range s {
+		// 注音符号 U+3100–312F（ㄅㄆㄇ…）
+		if r >= 0x3100 && r <= 0x312F {
+			return true
+		}
+		// 几何图形 U+25A0–25FF（◈★▣）与杂项符号 U+2600–26FF（☀♫）
+		if (r >= 0x25A0 && r <= 0x25FF) || (r >= 0x2600 && r <= 0x26FF) {
+			return true
+		}
+		if r >= 0x80 && r <= 0xA0 { // Latin-1 控制/符号区（Ã/â 等误读特征）
+			return true
+		}
+	}
+	return false
+}
+
+// parseFileNameArtistTitle splits "艺术家 - 标题.ext" from a filename, falling
+// back to (base, "") when no separator is present. Used to recover readable
+// artist/title from an unrecoverable garbled tag.
+func parseFileNameArtistTitle(fn string) (artist, title string) {
+	base := fn
+	for {
+		ext := strings.ToLower(filepath.Ext(base))
+		if ext == "" || !model.AudioExts[ext] {
+			break
+		}
+		base = strings.TrimSuffix(base, ext)
+	}
+	base = strings.TrimSpace(base)
+	// 文件名规范为「艺术家 - 歌曲标题」，标题本身可含“-”，因此按首个分隔符拆分
+	for _, sep := range []string{" - ", "—", "–", "-"} {
+		if i := strings.Index(base, sep); i > 0 {
+			a := strings.TrimSpace(base[:i])
+			t := strings.TrimSpace(base[i+len(sep):])
+			if a != "" && t != "" {
+				return a, t
+			}
+		}
+	}
+	return "", base
+}
+
 // fixEncodingHandler rewrites the text fields of selected tracks, repairing
-// any mojibake it can detect.
+// any mojibake it can detect. When a tag cannot be repaired (double-corrupted,
+// information lost) but the filename carries a clean "artist - title", the
+// artist/title tags fall back to the filename so the track stays readable.
 func fixEncodingHandler(s *store, fp dedup.Fingerprinter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct{ IDs []string `json:"ids"` }
@@ -136,7 +206,21 @@ func fixEncodingHandler(s *store, fp dedup.Fingerprinter) http.HandlerFunc {
 					continue
 				}
 				f := fixMojibake(v)
-				if f != v {
+				// 有明确乱码特征（◈/注音/FFFD/Latin-1 控制区）的字段：文件名解析结果
+				// 远比“尽力修复”可信，标题/艺术家直接回退文件名；其他字段仍尽力修复。
+				if looksGarbled(v) && (k == taglibx.Title || k == taglibx.Artist) {
+					fArtist, fTitle := parseFileNameArtistTitle(t.FileName)
+					if k == taglibx.Title && fTitle != "" {
+						f = fTitle
+					} else if k == taglibx.Artist && fArtist != "" {
+						f = fArtist
+					}
+					if f == v { // 文件名解析不出有效值，退回尽力修复
+						f = fixMojibake(v)
+					}
+				}
+				// 修复结果仍含替换符/乱码特征时丢弃，避免以乱易乱
+				if f != v && !strings.ContainsRune(f, '\uFFFD') && !looksGarbled(f) {
 					changed[k] = f
 					m[k] = []string{f}
 				}

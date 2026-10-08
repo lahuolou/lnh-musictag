@@ -82,7 +82,7 @@ func (m *MultiSource) Client() *Client { return m.client }
 
 // Sources returns the ordered source list (for the UI dropdown).
 func (m *MultiSource) Sources() []SourceInfo {
-	out := []SourceInfo{{Name: "auto", Label: "自动（按语言优选：中文→国内源，外文→国际源）"}}
+	out := []SourceInfo{{Name: "auto", Label: "自动"}}
 	for _, n := range m.order {
 		s := m.byName[n]
 		out = append(out, SourceInfo{Name: n, Label: s.Label()})

@@ -32,6 +32,36 @@ func scriptConverter(to string) func(string) string {
 	}
 }
 
+// detectTraditional reports whether any text tag contains Traditional Chinese,
+// using OpenCC (t2s: converting to simplified changes the string if it contains
+// traditional forms). A shared converter is reused across calls.
+var tradDetector = func() func(string) string {
+	cc, err := gocc.New("t2s")
+	if err != nil {
+		return func(s string) string { return s }
+	}
+	return func(s string) string {
+		o, err := cc.Convert(s)
+		if err != nil {
+			return s
+		}
+		return o
+	}
+}()
+
+func detectTraditional(tags map[string]string) bool {
+	for _, k := range textFields {
+		v := strings.TrimSpace(tags[k])
+		if v == "" {
+			continue
+		}
+		if tradDetector(v) != v {
+			return true
+		}
+	}
+	return false
+}
+
 // convertScriptHandler converts the text fields of selected tracks between
 // simplified and traditional Chinese.
 func convertScriptHandler(s *store, fp dedup.Fingerprinter) http.HandlerFunc {

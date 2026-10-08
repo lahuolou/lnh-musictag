@@ -48,6 +48,7 @@ func (s *store) add(t *model.Track) {
 	if _, exists := s.byPath[t.Path]; exists {
 		return
 	}
+	t.HasTrad = detectTraditional(t.Tags)
 	s.tracks[t.ID] = t
 	s.byPath[t.Path] = t.ID
 	s.seq++
@@ -870,6 +871,7 @@ func refreshTrack(s *store, path string, fp dedup.Fingerprinter) {
 			t.Fingerprint = f
 		}
 	}
+	t.HasTrad = detectTraditional(t.Tags)
 	s.mu.Lock()
 	s.tracks[t.ID] = t
 	s.byPath[path] = t.ID

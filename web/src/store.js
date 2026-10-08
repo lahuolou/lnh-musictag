@@ -39,7 +39,7 @@ export async function loadSources() {
   try { state.sources = await api('/api/scrape/sources'); }
   catch (e) {
     state.sources = [
-      { name: 'auto', label: '自动（按语言优选）' }, { name: 'musicbrainz', label: 'MusicBrainz' },
+      { name: 'auto', label: '自动' }, { name: 'musicbrainz', label: 'MusicBrainz' },
       { name: 'itunes', label: 'iTunes' }, { name: 'netease', label: '网易云' }, { name: 'qq', label: 'QQ音乐' }
     ];
   }

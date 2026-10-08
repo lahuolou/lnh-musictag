@@ -15,9 +15,6 @@ const sortDir = ref(1) // 1=升序 -1=降序
 const pageSize = 200
 const visible = ref(pageSize)
 
-// 繁体专有字（简体中不存在），用于“繁体”筛选
-const TRAD_SET = '這那們時間說學會後點對與應來為愛樂讓體識認請語質護車風華東開關馬鳥魚龍長發興義氣無見覺親觀邊還進過這這麼樣種頭裏條單雙萬億賣買價錢銀銅鐵鋼鹽糖湯飯餐館樓層廳室庫廚門窗牆橋輪機械電腦網線紙筆書畫際標準規則條約證據賬號碼鍵盤螢幕顯示頻錄影攝像鏡頭電池插座按鈕遙控';
-
 // 归一化：全角→半角、全角空格→普通空格、小写、去首尾空白（兼容中文输入习惯）
 function norm(s) {
   return (s || '').replace(/[\uFF01-\uFF5E]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
@@ -29,9 +26,7 @@ function isGarbled(t) {
   return /[\uFFFD]/.test(s) || /[ÃÂ][\u0080-\u00BF]/.test(s) || /â€[™“”Œ]/.test(s) || /[åæçèéêëìíîï][\u0080-\u00BF]{2}/.test(s);
 }
 function isTrad(t) {
-  const s = [t.tags.TITLE || '', t.tags.ARTIST || '', t.tags.ALBUM || ''].join(' ');
-  if (!/[\u4E00-\u9FFF]/.test(s)) return false;
-  return [...TRAD_SET].some(c => s.includes(c));
+  return !!t.hasTrad;
 }
 
 // 表格列表：全部曲目（可按关键词过滤 + 按问题类型筛选）
@@ -197,7 +192,7 @@ onBeforeUnmount(stopPoll);
         <button v-if="state.scanStatus.running" class="ghost sm" @click="togglePause">{{ state.scanStatus.paused ? '继续' : '暂停' }}</button>
       </div>
       <div class="row" style="margin-top:8px">
-        <input type="text" v-model="q" placeholder="输入即搜索 标题/艺术家/专辑/文件名（自动忽略全角/大小写）" style="min-width:0" />
+        <input type="text" v-model="q" placeholder="输入即搜索 歌名" style="min-width:0" />
       </div>
       <div class="filters" style="margin-top:8px">
         <button v-for="f in filterOpts" :key="f.id" class="chip" :class="{ on: filter === f.id }" @click="filter = f.id">{{ f.label }}</button>
@@ -206,7 +201,7 @@ onBeforeUnmount(stopPoll);
     </div>
 
     <div class="ml-head">
-      {{ filtering ? '匹配 ' + filtered.length + ' / 共 ' + state.tracks.length : '曲目 ' + state.tracks.length }} · 扫描中按扫描顺序排列，暂停/完成后可点标题、艺术家等表头按 A-Z 0-9 排序 · 勾选后到「批量」补全 · 点击行进「编辑」
+      {{ filtering ? '匹配 ' + filtered.length + ' / 共 ' + state.tracks.length : '曲目 ' + state.tracks.length }} · 勾选后到「批量」补全 · 点击行进「编辑」
     </div>
 
     <div class="tree-scroll" @scroll.passive="onScroll">

@@ -67,18 +67,6 @@ function selectedFieldNames() {
   return names;
 }
 
-async function fixTitle() {
-  if (state.selected.size === 0) { toast('请先在列表勾选曲目', 'err'); return; }
-  try {
-    const r = await api('/api/tracks/fix-title', { method: 'POST', body: JSON.stringify({ ids: [...state.selected] }) });
-    const arr = r.fixed || [];
-    const n = arr.filter(x => x.fixed).length;
-    toast('标题修正完成：' + n + '/' + arr.length + ' 首', 'ok');
-    clearSel();
-    await refresh();
-  } catch (e) { toast('标题修正失败: ' + e.message, 'err'); }
-}
-
 async function startBatch() {
   if (state.selected.size === 0) { toast('请先在列表勾选曲目', 'err'); return; }
   const names = selectedFieldNames();
@@ -150,7 +138,6 @@ function showProgress(jobId) {
       <option v-for="s in state.sources" :key="s.name" :value="s.name">{{ s.label }}</option>
     </select>
     <button :disabled="state.batchBusy" @click="startBatch">批量补全 ({{ state.selected.size }})</button>
-    <button class="ghost sm" @click="fixTitle">修正标题(去后缀)</button>
   </div>
 
   <div v-if="prog" style="margin-top:12px">
