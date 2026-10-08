@@ -28,7 +28,8 @@ type Track struct {
 // DuplicateGroup groups tracks that share the same dedup key (sha256 or fingerprint).
 type DuplicateGroup struct {
 	Key    string   `json:"key"`
-	Method string   `json:"method"` // "hash" | "fingerprint"
+	Method string   `json:"method"` // "hash" | "fingerprint" | "format"
 	Count  int      `json:"count"`
 	IDs    []string `json:"ids"`
+	KeepID string   `json:"keepId,omitempty"` // "format" 组的保留者（音质最佳）
 }

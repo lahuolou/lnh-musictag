@@ -12,7 +12,7 @@
 |---|---|---|
 | ① 标签读写 | `go.senan.xyz/taglib`（WASM，无 CGo，MP3/FLAC/M4A/OGG/WAV/WMA…），多值标签、内嵌封面 | 写标题/艺术家/专辑/专辑艺术家/流派/年份/曲目号/封面/歌词 |
 | ② 异步扫描 | `/api/scan` 后台任务，**边扫边入库**；前端轮询 `/api/scan/status` 增量渲染曲目，不等全部扫完 | 扫描期间即见曲目 |
-| ③ 歌曲去重 | SHA256 文件哈希（默认）+ 音频指纹（可插拔） | 去重页 |
+| ③ 歌曲去重 | SHA256 文件哈希（默认）+ 音频指纹（可插拔）+ **同名多格式**（同名不同格式只保留音质最佳，按格式/码率/采样率评分） | 去重页 |
 | ④ 多源刮削 | **11 个源**：MusicBrainz / iTunes / 网易云 / QQ / 酷狗 / 酷我 / 咪咕 / 哔哩哔哩 / 汽水 / 波点 / 千千 | 搜索/应用，自动依次尝试 |
 | ⑤ 补全元数据 | MusicBrainz release 详情回填**专辑艺术家、流派、年代、曲目号**；写入标签 | 批量/单曲刮削均可 |
 | ⑥ 歌词 | 网易云 LRC + lrclib，自动选择 | 单曲获取/编辑/保存，批量「含歌词」 |
@@ -30,7 +30,7 @@
 ## 快速开始（Docker）
 
 前置：目标机已装 Docker（含 compose）。镜像为多阶段构建的静态二进制（scratch 运行层，约 10MB，带 CA 证书，构建时按目标机架构自动适配）。
-
+  docker镜像地址：ghcr.io/lahuolou/lnh-musictag:latest
 ```bash
 # 1) 在项目目录构建并启动（或直接拉 GHCR 镜像）
 cd /path/to/LNH-musictag
@@ -38,6 +38,8 @@ docker compose up -d
 
 # 2) 编辑 docker-compose.yml，把 /mnt/sata3-1/mp3 改成你的真实音乐目录
 ```
+
+
 
 浏览器访问 **http://<主机IP>:10248**：
 

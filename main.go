@@ -304,6 +304,7 @@ func main() {
 		if fingerprinter.Available() {
 			groups = append(groups, dedup.GroupByFingerprint(tracks)...)
 		}
+		groups = append(groups, dedup.GroupBySameName(tracks)...)
 		writeJSON(w, http.StatusOK, groups)
 	})
 

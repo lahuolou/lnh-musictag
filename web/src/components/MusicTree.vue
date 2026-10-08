@@ -79,15 +79,14 @@ async function tick() {
 function startPoll() { stopPoll(); poll = setInterval(tick, 800); }
 function stopPoll() { if (poll) { clearInterval(poll); poll = null; } }
 
-async function renameFiles() {
-  const ids = state.selected.size ? [...state.selected] : [];
-  if (!state.tracks.length) { toast('没有曲目', 'err'); return; }
-  try {
-    const res = await api('/api/rename-files', { method: 'POST', body: JSON.stringify({ ids }) });
-    const n = res.results ? res.results.filter(r => r.renamed).length : 0;
-    toast('重命名完成：' + n + ' 个文件已改名', 'ok');
-    await refresh();
-  } catch (e) { toast('重命名失败: ' + e.message, 'err'); }
+function treeTrackCount(nodes) {
+  let n = 0;
+  for (const nd of nodes) { n += nd.dir ? treeTrackCount(nd.children) : 1; }
+  return n;
+}
+function doSearch() {
+  if (!q.value.trim()) { toast('请输入搜索关键词', 'err'); return; }
+  toast('搜索完成：共 ' + treeTrackCount(tree.value) + ' 首匹配', 'ok');
 }
 
 onMounted(async () => { await loadSources(); await refresh(); if (state.scanStatus.running) startPoll(); });
@@ -102,8 +101,8 @@ onBeforeUnmount(stopPoll);
         <button class="sm" @click="scan" :disabled="state.scanStatus.running">{{ state.scanStatus.running ? '扫描中' : '扫描' }}</button>
       </div>
       <div class="row" style="margin-top:8px">
-        <input type="text" v-model="q" placeholder="搜索标题/艺术家/专辑/文件名" style="min-width:0" />
-        <button class="ghost sm" @click="renameFiles" :disabled="state.scanStatus.running" title="去重复/错误音频后缀">重命名</button>
+        <input type="text" v-model="q" placeholder="搜索标题/艺术家/专辑/文件名" style="min-width:0" @keydown.enter="doSearch" />
+        <button class="ghost sm" @click="doSearch">搜索</button>
       </div>
       <div class="loading">{{ scanMsg }}</div>
     </div>
