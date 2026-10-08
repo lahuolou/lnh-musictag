@@ -1,6 +1,6 @@
 # LNH-MusicTag
 
-纯 **Docker 部署**的自托管 Web 音乐标签工具（形态类似 Music Tag Web）：**标签读写 + 歌曲去重 + 多源元数据/歌词刮削 + 批量修正 + 异步扫描**，全部操作通过浏览器后台完成，无本地 CLI。
+纯 **Docker 部署**的自托管 Web 音乐标签管理工具：**标签读写 + 歌曲去重 + 多源元数据/歌词刮削 + 批量修正 + 格式转换 + 异步扫描**，全部操作通过浏览器后台完成，无本地 CLI。
 
 技术栈：**Go 后端（go-taglib WASM 封装 TagLib，无 CGo）+ 纯 Go SHA256 去重 + 11 个刮削源 + 歌词 + Vue3 多页面前端**，配置存 **SQLite**（不依赖环境变量）。
 
@@ -12,7 +12,7 @@
 |---|---|---|
 | ① 标签读写 | `go.senan.xyz/taglib`（WASM，无 CGo，MP3/FLAC/M4A/OGG/WAV/WMA…），多值标签、内嵌封面 | 写标题/艺术家/专辑/专辑艺术家/流派/年份/曲目号/封面/歌词 |
 | ② 异步扫描 | `/api/scan` 后台任务，**边扫边入库**；前端轮询 `/api/scan/status` 增量渲染曲目，不等全部扫完 | 扫描期间即见曲目 |
-| ③ 歌曲去重 | SHA256 文件哈希（默认）+ 音频指纹（可插拔）+ **同名多格式**（同名不同格式只保留音质最佳，按格式/码率/采样率评分） | 去重页 |
+| ③ 歌曲去重 | SHA256 文件哈希（默认）+ 音频指纹（可插拔）+ **同名多格式**（同名不同格式保留音质最佳）+ **艺术家+标题**（同歌不同名） | 去重页 |
 | ④ 多源刮削 | **11 个源**：MusicBrainz / iTunes / 网易云 / QQ / 酷狗 / 酷我 / 咪咕 / 哔哩哔哩 / 汽水 / 波点 / 千千 | 搜索/应用，自动依次尝试 |
 | ⑤ 补全元数据 | MusicBrainz release 详情回填**专辑艺术家、流派、年代、曲目号**；写入标签 | 批量/单曲刮削均可 |
 | ⑥ 歌词 | 网易云 LRC + lrclib，自动选择 | 单曲获取/编辑/保存，批量「含歌词」 |
@@ -79,8 +79,8 @@ docker pull ghcr.io/lahuolou/lnh-musictag:latest && docker restart lnh-musictag 
 浏览器访问 **http://<主机IP>:10248**：
 
 1. **登录页**：账号默认 `admin`。**首次启动自动生成随机初始密码**，打印在容器日志（`docker compose logs`），登录后到「设置」改密码（存数据库）。
-2. **列表（竖向整列）**：输入容器内音频目录（如 `/music`）→ 点「扫描」→ **边扫边出**；整列竖排列表（目录→曲目，checkbox+图标+文件名），点某首进「编辑」，可勾选多首。
-3. **顶部功能 tab**：**列表 / 编辑 / 批量 / 去重 / 设置**——编辑标签/刮削/歌词；批量补全；去重检测；改密与配置。
+2. **音乐列表**：输入容器内音频目录（如 `/music`）→ 点「扫描」→ **边扫边出**，扫描中按扫描顺序稳定排列（先扫到在前）；点击行进「编辑」，可勾选多首到「批量」。
+3. **功能区**：右侧 **编辑 / 批量 / 去重** 三个子 tab——编辑标签/刮削/歌词；批量补全/乱码修复/简繁转换/格式转换；去重检测（勾选手动删除）。**设置** 独立页，改密与配置。
 
 > 账号、密码、AcoustID Key、默认目录、是否自动去后缀等均保存在 **`/config/lnh.db`**（SQLite）。环境变量仅在**首次启动**作为一次性初始化种子，之后以数据库为准。
 
@@ -114,12 +114,12 @@ LNH-musictag/
   web/                    # Vue3 + Vite 前端（构建产物 dist 被 go:embed 编译进二进制）
     src/
       main.js             # Vue 入口
-      App.vue             # 整合布局：左侧树形音乐列表 + 右侧功能区 tab
+      App.vue             # 整合布局：左侧表格音乐列表 + 右侧功能区 tab
       store.js            # 响应式全局状态 + API 封装
       api.js              # fetch 封装（401 自动跳登录）
       views/Login.vue     # 登录页
       views/Settings.vue  # 设置（改密 + 数据库配置）
-      components/         # MusicTree/TreeNode（树形列表）、EditPanel、BatchPanel、DedupPanel、Toast
+      components/         # MusicTree（表格列表）、EditPanel、BatchPanel、DedupPanel、FormatDialog、Toast
 ```
 
 ## 刮削源
@@ -150,14 +150,21 @@ LNH-musictag/
 | GET | `/api/me` | 登录状态 |
 | POST | `/api/change-password` | `{oldPass,newPass}` 改密码（存数据库） |
 | POST | `/api/scan` | `{dir}` 开始异步扫描，立即返回 |
-| GET | `/api/scan/status` | 扫描进度 `{running,added,total,done}` |
-| GET | `/api/tracks` | 曲目列表（扫描中可反复拉取增量渲染） |
+| GET | `/api/scan/status` | 扫描进度 `{running,paused,added,total,done,skipped}` |
+| POST | `/api/scan/pause` | `{paused}` 暂停/继续扫描 |
+| GET | `/api/tracks` | 曲目列表（按扫描顺序稳定返回，扫描中可反复拉取增量渲染） |
 | GET | `/api/tracks/{id}/cover` | 读内嵌封面 |
-| POST | `/api/tracks/{id}/tags` | `{tags,clear}` 写标签（含 `LYRICS`） |
+| GET | `/api/tracks/{id}/lrcfile` | 读同目录外挂 `.lrc` 歌词 |
+| POST | `/api/tracks/{id}/tags` | `{tags,clear}` 写标签（含 `LYRICS`）；标题/艺术家与文件名不符时自动重命名为 `艺术家 - 标题.后缀` |
 | POST | `/api/tracks/{id}/cover` | `{url\|dataBase64\|clear}` 写封面 |
 | POST | `/api/tracks/fix-title` | `{ids}` 批量去音频后缀标题（默认全部） |
 | POST | `/api/rename-files` | `{ids}` 重命名文件：去重复/错误音频后缀（校验真实编码），`发如雪.mp3.flac→发如雪.flac` |
-| GET | `/api/duplicates` | 重复分组（hash + fingerprint） |
+| GET | `/api/duplicates` | 重复分组（hash + fingerprint + format + tags） |
+| POST | `/api/duplicates/remove` | `{ids}` 手动删除选中的重复文件 |
+| POST | `/api/set-chorus` | `{ids}` 艺术家>3 位 → 改“合唱” |
+| POST | `/api/fix-encoding` | `{ids}` 乱码标签修复（GBK/UTF-8） |
+| POST | `/api/convert-script` | `{ids,to}` 标签简繁转换 |
+| POST | `/api/convert` | `{ids,target,inputFormats,bitrate,sampleRate}` ffmpeg 格式转换 |
 | GET | `/api/settings` | 读取数据库配置（不含密码） |
 | POST | `/api/settings` | 保存配置（账号/Key/选项/目录） |
 | GET | `/api/scrape/sources` | 可用刮削源列表 |
