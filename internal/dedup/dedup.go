@@ -36,6 +36,45 @@ func qualityScore(t *model.Track) int {
 	return tier*100000 + int(t.Bitrate)*100 + int(t.SampleRate)
 }
 
+// GroupByArtistTitle groups tracks whose ARTIST + TITLE tags match (normalized).
+// Catches the common "same song ripped twice with different filenames" case.
+// The track with the best audio quality is flagged as the keeper (KeepID).
+func GroupByArtistTitle(tracks []*model.Track) []model.DuplicateGroup {
+	byKey := map[string][]*model.Track{}
+	for _, t := range tracks {
+		artist := strings.ToLower(strings.TrimSpace(t.Tags["ARTIST"]))
+		title := strings.ToLower(strings.TrimSpace(t.Tags["TITLE"]))
+		if artist == "" || title == "" {
+			continue
+		}
+		key := artist + "||" + title
+		byKey[key] = append(byKey[key], t)
+	}
+	groups := []model.DuplicateGroup{}
+	for key, ts := range byKey {
+		if len(ts) < 2 {
+			continue
+		}
+		best := ts[0]
+		for _, t := range ts[1:] {
+			if qualityScore(t) > qualityScore(best) {
+				best = t
+			}
+		}
+		ids := make([]string, 0, len(ts))
+		for _, t := range ts {
+			ids = append(ids, t.ID)
+		}
+		// key: "artist||title" -> 展示用 "artist - title"
+		display := strings.Replace(key, "||", " - ", 1)
+		groups = append(groups, model.DuplicateGroup{
+			Key: display, Method: "tags", Count: len(ids), IDs: ids, KeepID: best.ID,
+		})
+	}
+	sort.Slice(groups, func(i, j int) bool { return groups[i].Count > groups[j].Count })
+	return groups
+}
+
 // cleanBaseName strips all trailing audio extensions and lowercases a filename,
 // e.g. "广岛之恋.mp3.flac" -> "广岛之恋".
 func cleanBaseName(fn string) string {

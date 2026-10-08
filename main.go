@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"LNH-musictag/internal/dedup"
 	"LNH-musictag/internal/model"
@@ -93,20 +94,24 @@ func (s *store) removeByPath(p string) {
 type scanState struct {
 	mu      sync.Mutex
 	Running bool   `json:"running"`
+	Paused  bool   `json:"paused"`
 	Dir     string `json:"dir"`
 	Added   int    `json:"added"`
 	Total   int    `json:"total"` // audio files discovered so far
 	Done    int    `json:"done"`
+	Skipped int    `json:"skipped"` // 已知文件，智能跳过
 	Error   string `json:"error"`
 }
 
 // scanStatus is a lock-free snapshot of a scan state, safe to marshal/copy.
 type scanStatus struct {
 	Running bool   `json:"running"`
+	Paused  bool   `json:"paused"`
 	Dir     string `json:"dir"`
 	Added   int    `json:"added"`
 	Total   int    `json:"total"`
 	Done    int    `json:"done"`
+	Skipped int    `json:"skipped"`
 	Error   string `json:"error"`
 }
 
@@ -114,8 +119,8 @@ func (st *scanState) snapshot() scanStatus {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	return scanStatus{
-		Running: st.Running, Dir: st.Dir, Added: st.Added,
-		Total: st.Total, Done: st.Done, Error: st.Error,
+		Running: st.Running, Paused: st.Paused, Dir: st.Dir, Added: st.Added,
+		Total: st.Total, Done: st.Done, Skipped: st.Skipped, Error: st.Error,
 	}
 }
 
@@ -155,6 +160,16 @@ func (sm *scanManager) status() scanStatus {
 		return scanStatus{}
 	}
 	return sm.state.snapshot()
+}
+
+func (sm *scanManager) pause(p bool) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if sm.state != nil {
+		sm.state.mu.Lock()
+		sm.state.Paused = p
+		sm.state.mu.Unlock()
+	}
 }
 
 func main() {
@@ -238,6 +253,66 @@ func main() {
 	pm.HandleFunc("GET /api/scan/status", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, scans.status())
 	})
+	// 暂停 / 继续扫描
+	pm.HandleFunc("POST /api/scan/pause", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Paused bool `json:"paused"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		scans.pause(req.Paused)
+		writeJSON(w, http.StatusOK, scans.status())
+	})
+
+	// 艺术家过多改“合唱”：ARTIST 拆分后 >3 位 → 置为“合唱”
+	pm.HandleFunc("POST /api/set-chorus", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ IDs []string `json:"ids"` }
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		type res struct {
+			ID       string `json:"id"`
+			FileName string `json:"fileName"`
+			Changed  bool   `json:"changed"`
+			Before   string `json:"before"`
+			Message  string `json:"message,omitempty"`
+		}
+		results := []res{}
+		for _, id := range req.IDs {
+			t := store.get(id)
+			if t == nil {
+				continue
+			}
+			artist := strings.TrimSpace(t.Tags["ARTIST"])
+			parts := strings.FieldsFunc(artist, func(r rune) bool {
+				return r == '/' || r == ';' || r == '、' || r == '，' || r == ',' || r == '&'
+			})
+			uniq := map[string]bool{}
+			for _, p := range parts {
+				p = strings.TrimSpace(p)
+				if p != "" {
+					uniq[p] = true
+				}
+			}
+			r := res{ID: t.ID, FileName: t.FileName, Before: artist}
+			if len(uniq) > 3 {
+				if err := taglibx.WriteTags(t.Path, map[string][]string{taglibx.Artist: {"合唱"}}, false); err == nil {
+					refreshTrack(store, t.Path, fingerprinter)
+					r.Changed = true
+					r.Message = "→ 合唱（原 " + strconv.Itoa(len(uniq)) + " 位）"
+				} else {
+					r.Message = "写标签失败: " + err.Error()
+				}
+			} else {
+				r.Message = "艺术家 ≤3 位，跳过"
+			}
+			results = append(results, r)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"total": len(results), "results": results})
+	})
 
 	// --- Config / settings (stored in DB) ---
 	pm.HandleFunc("GET /api/settings", func(w http.ResponseWriter, r *http.Request) {
@@ -305,6 +380,7 @@ func main() {
 			groups = append(groups, dedup.GroupByFingerprint(tracks)...)
 		}
 		groups = append(groups, dedup.GroupBySameName(tracks)...)
+		groups = append(groups, dedup.GroupByArtistTitle(tracks)...)
 		writeJSON(w, http.StatusOK, groups)
 	})
 
@@ -373,8 +449,37 @@ func main() {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		refreshTrack(store, t.Path, fingerprinter)
-		writeJSON(w, http.StatusOK, map[string]string{"ok": "written"})
+		// 保存后：标题/艺术家与文件名不符时，把源文件重命名为“艺术家 - 标题.后缀”
+		renamed := false
+		newName := t.FileName
+		if title := strings.TrimSpace(req.Tags["TITLE"]); title != "" {
+			artist := strings.TrimSpace(req.Tags["ARTIST"])
+			wantBase := sanitizeName(title)
+			if artist != "" {
+				wantBase = sanitizeName(artist) + " - " + wantBase
+			}
+			ext := strings.ToLower(strings.TrimPrefix(t.Ext, "."))
+			if ext == "" {
+				ext = "mp3"
+			}
+			if stripAudioExt(t.FileName) != wantBase {
+				newPath := filepath.Join(filepath.Dir(t.Path), wantBase+"."+ext)
+				if newPath != t.Path {
+					if _, serr := os.Stat(newPath); serr != nil {
+						if rerr := os.Rename(t.Path, newPath); rerr == nil {
+							store.removeByPath(t.Path)
+							refreshTrack(store, newPath, fingerprinter)
+							renamed = true
+							newName = filepath.Base(newPath)
+						}
+					}
+				}
+			}
+		}
+		if !renamed {
+			refreshTrack(store, t.Path, fingerprinter)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": "written", "renamed": renamed, "name": newName})
 	})
 
 	// Embed cover art of a track
@@ -570,6 +675,8 @@ func main() {
 // extensions in the title are stripped and written back to the file.
 // When autoRename is enabled, files are first renamed to keep only their real
 // encoding extension (detected from the header), e.g. "发如雪.mp3.flac" -> "发如雪.flac".
+// Known files (already in the store) are smart-skipped without re-reading tags,
+// and the scan can be paused/resumed via st.Paused.
 func scanDirLive(s *store, dir string, fp dedup.Fingerprinter, st *scanState, autoFix, autoRename bool) (int, error) {
 	st0, err := os.Stat(dir)
 	if err != nil {
@@ -583,6 +690,10 @@ func scanDirLive(s *store, dir string, fp dedup.Fingerprinter, st *scanState, au
 		if err != nil {
 			return nil // skip unreadable entries
 		}
+		// 暂停点：暂停期间阻塞等待恢复
+		for st.snapshot().Paused {
+			time.Sleep(300 * time.Millisecond)
+		}
 		if d.IsDir() {
 			return nil
 		}
@@ -592,6 +703,14 @@ func scanDirLive(s *store, dir string, fp dedup.Fingerprinter, st *scanState, au
 		st.mu.Lock()
 		st.Total++
 		st.mu.Unlock()
+		// 智能跳过：已知文件（已在库中）不再重复读标签/算哈希
+		if s.exists(path) {
+			st.mu.Lock()
+			st.Done++
+			st.Skipped++
+			st.mu.Unlock()
+			return nil
+		}
 		// 文件重命名：去重复/错误音频后缀（先校验真实编码格式）
 		if autoRename {
 			oldPath := path

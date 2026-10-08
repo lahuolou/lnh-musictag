@@ -63,6 +63,14 @@ func stripAudioExt(s string) string {
 	return s
 }
 
+// sanitizeName removes characters that are illegal in file names and collapses
+// whitespace, e.g. "a / b" -> "a _ b".
+func sanitizeName(s string) string {
+	s = strings.NewReplacer("/", "_", "\\", "_", ":", "_", "*", "_", "?", "_", "\"", "_", "<", "_", ">", "_", "|", "_").Replace(s)
+	s = strings.Join(strings.Fields(s), " ")
+	return strings.TrimSpace(s)
+}
+
 // renameCleanFile renames an audio file so it keeps only its real extension,
 // determined from the actual encoding (magic bytes), not the current suffix.
 //   - "发如雪.mp3.flac" (real FLAC) -> "发如雪.flac"

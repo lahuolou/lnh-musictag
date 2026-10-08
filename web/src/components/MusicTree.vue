@@ -34,6 +34,7 @@ const filtered = computed(() => {
   else if (filter.value === 'trad') list = list.filter(isTrad);
   else if (filter.value === 'nolyric') list = list.filter(t => !hasLyrics(t));
   else if (filter.value === 'nocover') list = list.filter(t => !t.hasCover);
+  else if (filter.value === 'noartist') list = list.filter(t => !(t.tags.ARTIST || '').trim());
   return list;
 });
 const filterOpts = [
@@ -41,8 +42,10 @@ const filterOpts = [
   { id: 'garbled', label: '乱码' },
   { id: 'trad', label: '繁体' },
   { id: 'nolyric', label: '无歌词' },
-  { id: 'nocover', label: '无封面' }
+  { id: 'nocover', label: '无封面' },
+  { id: 'noartist', label: '无艺术家' }
 ];
+const filtering = computed(() => q.value.trim() !== '' || filter.value !== 'all');
 
 // 文件名（去音频扩展名），如 陈小春 - 街角的晚风.flac → 陈小春 - 街角的晚风
 function trackName(t) {
@@ -80,9 +83,9 @@ async function tick() {
     state.scanStatus = st;
     if (st.running) {
       try { state.tracks = await api('/api/tracks'); } catch (e) {}
-      scanMsg.value = '扫描中… 已加载 ' + st.added + ' 首 / 发现 ' + st.total;
+      scanMsg.value = '扫描中… 已加载 ' + st.added + ' 首 / 发现 ' + st.total + (st.skipped ? '（智能跳过 ' + st.skipped + '）' : '');
     } else {
-      scanMsg.value = '扫描完成：共 ' + st.added + ' 首' + (st.error ? '（' + st.error + '）' : '');
+      scanMsg.value = '扫描完成：共 ' + st.added + ' 首' + (st.skipped ? '（智能跳过 ' + st.skipped + '）' : '') + (st.error ? '（' + st.error + '）' : '');
       stopPoll();
       await refresh();
     }
@@ -90,9 +93,13 @@ async function tick() {
 }
 function startPoll() { stopPoll(); poll = setInterval(tick, 800); }
 function stopPoll() { if (poll) { clearInterval(poll); poll = null; } }
-function doSearch() {
-  if (!q.value.trim()) { toast('请输入搜索关键词', 'err'); return; }
-  toast('搜索完成：共 ' + filtered.value.length + ' 首匹配', 'ok');
+
+async function togglePause() {
+  try {
+    const r = await api('/api/scan/pause', { method: 'POST', body: JSON.stringify({ paused: !state.scanStatus.paused }) });
+    state.scanStatus = r;
+    toast(r.paused ? '已暂停扫描' : '已继续扫描', 'ok');
+  } catch (e) { toast('操作失败: ' + e.message, 'err'); }
 }
 
 onMounted(async () => { await loadSources(); await refresh(); if (state.scanStatus.running) startPoll(); });
@@ -105,19 +112,19 @@ onBeforeUnmount(stopPoll);
       <div class="row">
         <input type="text" v-model="scanDir" placeholder="容器内音频目录，如 /music" @keydown.enter="scan" style="min-width:0" />
         <button class="sm" @click="scan" :disabled="state.scanStatus.running">{{ state.scanStatus.running ? '扫描中' : '扫描' }}</button>
+        <button v-if="state.scanStatus.running" class="ghost sm" @click="togglePause">{{ state.scanStatus.paused ? '继续' : '暂停' }}</button>
       </div>
       <div class="row" style="margin-top:8px">
-        <input type="text" v-model="q" placeholder="搜索标题/艺术家/专辑/文件名" style="min-width:0" @keydown.enter="doSearch" />
-        <button class="ghost sm" @click="doSearch">搜索</button>
+        <input type="text" v-model="q" placeholder="输入即搜索 标题/艺术家/专辑/文件名" style="min-width:0" />
       </div>
       <div class="filters" style="margin-top:8px">
         <button v-for="f in filterOpts" :key="f.id" class="chip" :class="{ on: filter === f.id }" @click="filter = f.id">{{ f.label }}</button>
       </div>
-      <div class="loading">{{ scanMsg }}</div>
+      <div class="loading" style="margin-top:6px">{{ scanMsg }}{{ state.scanStatus.paused ? '（已暂停）' : '' }}</div>
     </div>
 
     <div class="ml-head">
-      曲目 {{ filtered.length }} · 勾选后到「批量」补全 · 点击行进「编辑」
+      {{ filtering ? '匹配 ' + filtered.length + ' / 共 ' + state.tracks.length : '曲目 ' + state.tracks.length }} · 勾选后到「批量」补全 · 点击行进「编辑」
     </div>
 
     <div class="tree-scroll">

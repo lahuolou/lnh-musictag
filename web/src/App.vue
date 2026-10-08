@@ -51,7 +51,7 @@ onMounted(async () => {
         </div>
         <div class="right">
           <div class="subtabs">
-            <button class="tab" :class="{ on: state.activeTab === 'edit' }" @click="tab('edit')">编辑/刮削</button>
+            <button class="tab" :class="{ on: state.activeTab === 'edit' }" @click="tab('edit')">编辑</button>
             <button class="tab" :class="{ on: state.activeTab === 'batch' }" @click="tab('batch')">批量</button>
             <button class="tab" :class="{ on: state.activeTab === 'dedup' }" @click="tab('dedup')">去重</button>
           </div>

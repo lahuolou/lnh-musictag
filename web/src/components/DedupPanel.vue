@@ -5,22 +5,33 @@ import { api } from '../api.js'
 
 function fileName(id) { const t = state.tracks.find(x => x.id === id); return t ? t.fileName : id; }
 
-// 每个“格式”组的保留选择（默认建议最佳）
-const keepSel = reactive({})
+const methodMeta = {
+  hash: { cls: 'hash', label: 'SHA256' },
+  fingerprint: { cls: 'fp', label: '指纹' },
+  format: { cls: 'src', label: '格式' },
+  tags: { cls: 'src', label: '艺术家+标题' }
+};
+function meta(g) { return methodMeta[g.method] || methodMeta.hash; }
+
+// 每个分组的多选状态（默认勾选除“保留最佳”外的全部，用户可自行调整）
+const checks = reactive({})
 watch(() => state.dupGroups, (groups) => {
-  groups.forEach((g, i) => {
-    if (g.method === 'format' && keepSel[i] === undefined) {
-      keepSel[i] = g.keepId || g.ids[0];
-    }
+  groups.forEach((g, gi) => {
+    if (!checks[gi]) checks[gi] = new Set();
+    const keep = g.keepId || g.ids[0];
+    g.ids.forEach(id => { if (id !== keep) checks[gi].add(id); });
   });
 }, { immediate: true });
 
-async function keepGroup(g, i) {
-  const chosen = keepSel[i];
-  if (!chosen) { toast('请先选择要保留的那一首', 'err'); return; }
-  const del = g.ids.filter(id => id !== chosen);
-  if (del.length === 0) return;
-  const sure = confirm('将删除以下 ' + del.length + ' 个文件（保留所选的最佳音质）：\n' + del.map(fileName).join('\n') + '\n\n确定删除吗？');
+function tog(gi, id) {
+  if (checks[gi].has(id)) checks[gi].delete(id); else checks[gi].add(id);
+}
+function selIds(gi, g) { return g.ids.filter(id => checks[gi] && checks[gi].has(id)); }
+
+async function delChecked(gi, g) {
+  const del = selIds(gi, g);
+  if (!del.length) { toast('请先勾选要删除的项', 'err'); return; }
+  const sure = confirm('将删除 ' + del.length + ' 个文件（不会删除勾选外的保留项）：\n' + del.map(fileName).join('\n') + '\n\n确定删除吗？');
   if (!sure) return;
   try {
     const r = await api('/api/duplicates/remove', { method: 'POST', body: JSON.stringify({ ids: del }) });
@@ -34,20 +45,19 @@ async function keepGroup(g, i) {
 <template>
   <button class="ghost sm" @click="loadDups">重新检测</button>
   <div class="muted" style="margin-top:8px;font-size:12px">
-    同名不同格式：只做检测、不自动删除，请在下单选好保留的最佳音质后手动删除其余。
+    重复分组：SHA256 / 指纹 / 同名不同格式 / 艺术家+标题。勾选要删除的项（默认保留最佳音质），再点「删除选中」。
   </div>
   <div v-if="state.dupGroups.length === 0" class="muted" style="margin-top:10px">未发现重复。</div>
   <div v-for="(g, gi) in state.dupGroups" :key="gi" class="dup">
-    <span class="tag" :class="g.method === 'hash' ? 'hash' : (g.method === 'format' ? 'src' : 'fp')">{{ g.method === 'hash' ? 'SHA256' : (g.method === 'format' ? '格式' : '指纹') }}</span>
+    <span class="tag" :class="meta(g).cls">{{ meta(g).label }}</span>
     <span class="dupcol">
-      <span class="duphead"><b>{{ g.count }}</b> 首 · 同名不同格式（按音质评分）</span>
+      <span class="duphead"><b>{{ g.count }}</b> 首 · {{ g.key }}</span>
       <span v-for="id in g.ids" :key="id" class="dupitem">
-        <input type="radio" v-if="g.method === 'format'" :name="'keep-' + gi" :value="id" v-model="keepSel[gi]" />
-        <span v-if="g.method === 'format' && keepSel[gi] === id" class="tag src">保留</span>
-        <span v-if="g.method === 'format' && g.keepId === id && keepSel[gi] !== id" class="muted" style="font-size:11px">（建议最佳）</span>
+        <input type="checkbox" class="tchk" :checked="checks[gi] && checks[gi].has(id)" @change="tog(gi, id)" />
+        <span v-if="g.keepId === id" class="tag src">建议保留</span>
         {{ fileName(id) }}
       </span>
-      <button v-if="g.method === 'format'" class="ghost sm" style="margin-top:4px" @click="keepGroup(g, gi)">保留所选，删除其余 {{ g.count - 1 }} 首</button>
+      <button class="ghost sm" style="margin-top:4px;align-self:flex-start" @click="delChecked(gi, g)">删除选中 ({{ selIds(gi, g).length }})</button>
     </span>
   </div>
 </template>

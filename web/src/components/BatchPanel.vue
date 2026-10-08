@@ -39,6 +39,19 @@ async function convertScript() {
   } catch (e) { toast('简繁转换失败: ' + e.message, 'err'); }
 }
 
+async function setChorus() {
+  if (!needsSel()) return;
+  try {
+    const r = await api('/api/set-chorus', {
+      method: 'POST', body: JSON.stringify({ ids: [...state.selected] })
+    });
+    const n = (r.results || []).filter(x => x.changed).length;
+    toast('合唱转换完成：' + n + '/' + r.total + ' 首（艺术家>3 位才改）', n ? 'ok' : 'err');
+    clearSel();
+    await refresh();
+  } catch (e) { toast('操作失败: ' + e.message, 'err'); }
+}
+
 // 批量补全可选字段（默认全选；已有该标签时智能跳过）
 const fields = reactive({
   cover: true, title: true, artist: true, albumArtist: true,
@@ -166,6 +179,14 @@ function showProgress(jobId) {
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:6px">
       <button class="ghost sm" @click="fixEnc">修复勾选 {{ state.selected.size }} 首的乱码标签</button>
       <span class="muted">自动识别并还原 GBK/UTF-8 错读的中文标题、艺术家等字段</span>
+    </div>
+  </div>
+
+  <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
+    <div class="h3">🎤 艺术家处理</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:6px">
+      <button class="ghost sm" @click="setChorus">艺术家>3 位 → 改为“合唱”</button>
+      <span class="muted">按 / ; 、 ， 拆分艺术家，超过 3 位时统一改为“合唱”</span>
     </div>
   </div>
 

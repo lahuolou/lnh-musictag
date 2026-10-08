@@ -15,7 +15,7 @@ export const state = reactive({
   fpActive: false,
   scanDir: '/music',
   scanMsg: '',
-  scanStatus: { running: false, added: 0, total: 0, done: 0, error: '' },
+  scanStatus: { running: false, paused: false, added: 0, total: 0, done: 0, skipped: 0, error: '' },
   bSource: 'auto',
   bFetchCover: true,
   bFetchLyrics: false,

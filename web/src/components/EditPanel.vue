@@ -26,12 +26,22 @@ function selFields(withCover) {
 function loadTrack(t) {
   if (!t) return;
   lastId = t.id;
+  // 标题/艺术家为空时默认从源文件名载入（如“陈小春 - 街角的晚风.flac” → 艺术家=陈小春，标题=街角的晚风）
+  let title = t.tags.TITLE || '';
+  let artist = t.tags.ARTIST || '';
+  if (!title) {
+    const base = (t.fileName || '').replace(/\.(mp3|flac|m4a|aac|ogg|opus|wav|wma|ape|mpc|aiff|mka)$/i, '');
+    const m = base.match(/^(.*?)\s*-\s*(.+)$/);
+    title = m ? m[2].trim() : base.trim();
+    if (!artist && m) artist = m[1].trim();
+  }
   f.value = {
-    title: t.tags.TITLE || '', artist: t.tags.ARTIST || '', album: t.tags.ALBUM || '',
-    albumartist: t.tags.ALBUMARTIST || '', genre: t.tags.GENRE || '', date: t.tags.DATE || '',
+    title, artist,
+    album: t.tags.ALBUM || '', albumartist: t.tags.ALBUMARTIST || '',
+    genre: t.tags.GENRE || '', date: t.tags.DATE || '',
     track: t.tags.TRACKNUMBER || '', lyrics: t.tags.LYRICS || ''
   };
-  sQuery.value = (t.tags.TITLE || '') + ' ' + (t.tags.ARTIST || '');
+  sQuery.value = title + ' ' + artist;
   sSource.value = 'auto';
 }
 
@@ -49,9 +59,10 @@ async function save() {
   };
   const body = { clear: false, tags: Object.fromEntries(Object.entries(tags).filter(([, v]) => v !== '')) };
   try {
-    await api('/api/tracks/' + encodeURIComponent(state.currentId) + '/tags', { method: 'POST', body: JSON.stringify(body) });
-    toast('标签已保存', 'ok');
+    const r = await api('/api/tracks/' + encodeURIComponent(state.currentId) + '/tags', { method: 'POST', body: JSON.stringify(body) });
+    toast('标签已保存' + (r.renamed ? '，文件已重命名为：' + r.name : ''), 'ok');
     await refresh();
+    if (r.renamed) loadTrack(state.tracks.find(t => t.id === state.currentId) || cur());
   } catch (e) { toast('保存失败: ' + e.message, 'err'); }
 }
 
