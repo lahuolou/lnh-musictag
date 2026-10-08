@@ -23,6 +23,7 @@ type Track struct {
 	HasCover   bool              `json:"hasCover"`
 	HasLrcFile bool              `json:"hasLrcFile"` // 同目录存在外挂 .lrc 歌词文件
 	HasTrad    bool              `json:"hasTrad"`   // 文本标签含繁体字（OpenCC 检测）
+	NeedsIdentify bool           `json:"needsIdentify"` // 标签与文件名均无有效信息，需按音频内容识别
 	Tags       map[string]string `json:"tags"`      // flattened: first value per standardized key
 }
 

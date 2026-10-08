@@ -50,6 +50,7 @@ func (s *store) add(t *model.Track) {
 		return
 	}
 	t.HasTrad = detectTraditional(t.Tags)
+	t.NeedsIdentify = needsIdentify(t)
 	s.tracks[t.ID] = t
 	s.byPath[t.Path] = t.ID
 	s.seq++
@@ -273,6 +274,7 @@ func main() {
 	pm.HandleFunc("POST /api/convert", convertHandler(store))
 	pm.HandleFunc("POST /api/fix-encoding", fixEncodingHandler(store))
 	pm.HandleFunc("POST /api/convert-script", convertScriptHandler(store))
+	pm.HandleFunc("POST /api/identify", identifyHandler(store, ms))
 	mux.Handle("/api/", sessions.requireAuth(pm))
 
 	// Static UI (Vue SPA built into web/dist; /api/... routes win over this)

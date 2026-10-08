@@ -22,10 +22,11 @@ COPY --from=fe /fe/dist ./web/dist
 RUN apk add --no-cache ca-certificates \
  && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/lnh-musictag .
 
-# ---- 运行阶段：alpine + ffmpeg（格式转换依赖 ffmpeg）----
+# ---- 运行阶段：alpine + ffmpeg + chromaprint ----
 FROM alpine:3.20
-# ffmpeg 供格式转换；ca-certificates 供应用 HTTPS 访问 MusicBrainz/网易云/QQ 等刮削源
-RUN apk add --no-cache ca-certificates ffmpeg
+# ffmpeg 供格式转换；chromaprint 提供 fpcalc 供“音频内容识别”；
+# ca-certificates 供应用 HTTPS 访问 MusicBrainz/网易云/QQ 等刮削源
+RUN apk add --no-cache ca-certificates ffmpeg chromaprint
 COPY --from=build /out/lnh-musictag /lnh-musictag
 
 EXPOSE 10248

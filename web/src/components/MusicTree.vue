@@ -42,6 +42,7 @@ const filtered = computed(() => {
   else if (filter.value === 'nolyric') list = list.filter(t => !hasLyrics(t) && !t.hasLrcFile);
   else if (filter.value === 'nocover') list = list.filter(t => !t.hasCover);
   else if (filter.value === 'noartist') list = list.filter(t => !(t.tags.ARTIST || '').trim());
+  else if (filter.value === 'needsid') list = list.filter(t => t.needsIdentify);
   return list;
 });
 const filterOpts = [
@@ -50,7 +51,8 @@ const filterOpts = [
   { id: 'trad', label: '繁体' },
   { id: 'nolyric', label: '无歌词' },
   { id: 'nocover', label: '无封面' },
-  { id: 'noartist', label: '无艺术家' }
+  { id: 'noartist', label: '无艺术家' },
+  { id: 'needsid', label: '待识别' }
 ];
 const filtering = computed(() => q.value.trim() !== '' || filter.value !== 'all');
 

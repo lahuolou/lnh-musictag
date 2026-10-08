@@ -14,13 +14,15 @@
 /* 单列竖排：顶部功能 tab + 主区整列音乐列表 */
 .page{max-width:1200px;margin:0 auto;padding:16px 20px}
 .pagebody{min-height:70vh}
-.music-list{display:flex;flex-direction:column}
+.music-list{display:flex;flex-direction:column;min-width:0}
+/* 列表区自身定高，滚动发生在 .tree-scroll 内部 → 表头 sticky 始终相对列表容器生效（下拉冻结） */
+.split .left .music-list{height:calc(100vh - 96px)}
 .ml-toolbar{display:flex;flex-direction:column;gap:0;padding:14px;background:var(--panel);border:1px solid var(--line);border-radius:12px}
 .ml-head{font-size:12px;color:var(--muted);padding:12px 4px 6px}
 .tree{max-height:calc(100vh - 260px);overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:6px}
-.tree-scroll{max-height:calc(100vh - 300px);overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.tree-scroll{flex:1;min-height:0;overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
 .mtbl{width:100%;border-collapse:collapse;font-size:13px}
-.mtbl{border-collapse:separate;border-spacing:0}
+.mtbl{border-collapse:separate;border-spacing:0;overflow:visible;background:transparent}
 .mtbl th{position:sticky;top:0;background:var(--panel2);text-align:left;padding:8px 10px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--line);z-index:2;white-space:nowrap}
 .mtbl th.th-sort{cursor:pointer;user-select:none}
 .mtbl th.th-sort:hover{color:var(--text)}
@@ -129,7 +131,36 @@ label{display:block;font-size:12px;color:var(--muted);margin:8px 0 4px}
 .split .left{flex:1.4;min-width:0}
 .split .right{flex:1;min-width:0;position:sticky;top:60px;max-height:calc(100vh - 80px);overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
 .subtabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:12px}
-@media(max-width:1080px){.split{flex-direction:column}.split .right{position:static;max-height:none}}
+@media(max-width:1080px){
+  .split{flex-direction:column}
+  .split .right{position:static;max-height:none}
+  .split .left .music-list{height:auto}
+  .tree-scroll{max-height:calc(100vh - 330px);flex:none}
+}
+
+/* 手机适配：窄屏隐藏低优先级列，表格宽度收敛 */
+@media(max-width:900px){
+  .page{padding:10px 12px}
+  .topnav{padding:8px 12px}
+  .split .right{padding:12px}
+  .ml-toolbar{padding:12px}
+  .mtbl th:nth-child(6),.mtbl td:nth-child(6),   /* 专辑艺术家 */
+  .mtbl th:nth-child(8),.mtbl td:nth-child(8),   /* LRC */
+  .mtbl th:nth-child(10),.mtbl td:nth-child(10)  /* 风格 */
+  {display:none}
+  .mtbl td:nth-child(3),.mtbl td:nth-child(4){max-width:130px}
+}
+@media(max-width:600px){
+  .mtbl th:nth-child(5),.mtbl td:nth-child(5),   /* 专辑 */
+  .mtbl th:nth-child(9),.mtbl td:nth-child(9)    /* 年份 */
+  {display:none}
+  .mtbl th:nth-child(7),.mtbl td:nth-child(7)    /* 歌词 */
+  {display:none}
+  .mtbl td:nth-child(3){max-width:100px}
+  .mtbl td:nth-child(4){max-width:90px}
+  .login-box{width:88vw;padding:26px 20px}
+  .fmt-grid{grid-template-columns:1fr}
+}
 .filters{display:flex;gap:6px;flex-wrap:wrap}
 .chip{background:var(--panel2);border:1px solid var(--line);color:var(--muted);padding:3px 12px;border-radius:14px;font-size:12px;cursor:pointer;white-space:nowrap}
 .chip:hover{color:var(--text)}

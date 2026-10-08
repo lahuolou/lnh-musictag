@@ -11,6 +11,7 @@ import (
 
 	"golang.org/x/text/encoding/simplifiedchinese"
 
+	"LNH-musictag/internal/model"
 	"LNH-musictag/internal/taglibx"
 )
 
@@ -89,6 +90,29 @@ func TestParseFileNameArtistTitle(t *testing.T) {
 		a, tt := parseFileNameArtistTitle(in)
 		if a != want[0] || tt != want[1] {
 			t.Fatalf("parseFileNameArtistTitle(%q) = (%q,%q), want (%q,%q)", in, a, tt, want[0], want[1])
+		}
+	}
+}
+
+func TestEffectiveSearchTerms(t *testing.T) {
+	mk := func(title, artist, fn string) *model.Track {
+		return &model.Track{Tags: map[string]string{"TITLE": title, "ARTIST": artist}, FileName: fn}
+	}
+	cases := []struct {
+		in       *model.Track
+		wantT    string
+		wantA    string
+	}{
+		{mk("蓝色蝴蝶", "Unknown", "Unknown - 蓝色蝴蝶.mp3"), "蓝色蝴蝶", "Unknown"},
+		{mk("", "", "陈慧娴 - 傻女.flac"), "傻女", "陈慧娴"},
+		{mk("七里香", "周杰伦", "周杰伦 - 七里香.flac"), "七里香", "周杰伦"},
+		{mk("姒荤◈锟斤拷", "未知", "蓝色蝴蝶.mp3"), "蓝色蝴蝶", ""},
+		{mk("", "", "发如雪.mp3"), "发如雪", ""},
+	}
+	for _, c := range cases {
+		tit, art := effectiveSearchTerms(c.in)
+		if tit != c.wantT || art != c.wantA {
+			t.Fatalf("effectiveSearchTerms(%q) = (%q,%q), want (%q,%q)", c.in.FileName, tit, art, c.wantT, c.wantA)
 		}
 	}
 }

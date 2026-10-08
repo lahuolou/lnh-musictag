@@ -1,0 +1,79 @@
+// Package finger provides audio-content fingerprinting via Chromaprint's
+// fpcalc CLI and similarity comparison between fingerprints. It is used to
+// identify tracks that carry no usable tags or filename (e.g. "track01.mp3")
+// by matching their audio content against already-tagged tracks in the library.
+//
+// fpcalc is bundled in the Docker image (apk add chromaprint); when it is
+// absent the engine reports unavailable and identification degrades gracefully.
+package finger
+
+import (
+	"math/bits"
+	"os/exec"
+	"strings"
+)
+
+// Fpcalc wraps the Chromaprint fpcalc CLI. Callers control concurrency
+// (fpcalc is a short-lived subprocess; a small worker pool is fine).
+type Fpcalc struct {
+	Bin string
+}
+
+func (f *Fpcalc) Available() bool {
+	if f.Bin == "" {
+		return false
+	}
+	_, err := exec.LookPath(f.Bin)
+	return err == nil
+}
+
+// Fingerprint returns the raw Chromaprint fingerprint (space-separated ints)
+// for a file.
+func (f *Fpcalc) Fingerprint(path string) (string, error) {
+	out, err := exec.Command(f.Bin, "-raw", path).Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// Similarity returns a 0..1 score between two fingerprints: 1 means identical.
+// It decodes the raw 32-bit ints and compares them with a normalized Hamming
+// distance. Fingerprints of different lengths (different durations) compare
+// over their common prefix.
+func Similarity(a, b string) float64 {
+	ai, bi := decode(a), decode(b)
+	if len(ai) == 0 || len(bi) == 0 {
+		return 0
+	}
+	n := len(ai)
+	if len(bi) < n {
+		n = len(bi)
+	}
+	diffs := 0
+	for i := 0; i < n; i++ {
+		diffs += bits.OnesCount32(ai[i] ^ bi[i])
+	}
+	total := n * 32
+	return 1 - float64(diffs)/float64(total)
+}
+
+func decode(s string) []uint32 {
+	var out []uint32
+	var cur uint32
+	flush := func() {
+		if cur != 0 || len(out) > 0 {
+			out = append(out, cur)
+		}
+	}
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			cur = cur*10 + uint32(r-'0')
+		} else {
+			flush()
+			cur = 0
+		}
+	}
+	flush()
+	return out
+}

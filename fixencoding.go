@@ -178,6 +178,41 @@ func parseFileNameArtistTitle(fn string) (artist, title string) {
 	return "", base
 }
 
+// looksUnknown reports whether a tag value is a placeholder that carries no
+// real metadata ("Unknown", "未知", 空值等)。刮削搜索时这些值没有检索价值。
+func looksUnknown(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return true
+	}
+	switch strings.ToLower(s) {
+	case "unknown", "unknown artist", "unknown artists", "未知", "未知艺术家", "未知歌手", "<unknown>", "n/a", "none":
+		return true
+	}
+	return false
+}
+
+// effectiveSearchTerms returns the title/artist that should be used to search
+// for a track: real tag values when present, otherwise values parsed from the
+// filename. This lets files like "Unknown - 蓝色蝴蝶.mp3" (placeholder artist,
+// clean title) still be scraped by their actual song name. If a tag is empty,
+// "Unknown" or clearly garbled, the filename wins.
+func effectiveSearchTerms(t *model.Track) (title, artist string) {
+	title = strings.TrimSpace(t.Tags["TITLE"])
+	artist = strings.TrimSpace(t.Tags["ARTIST"])
+	if title == "" || looksUnknown(title) || looksGarbled(title) ||
+		artist == "" || looksUnknown(artist) || looksGarbled(artist) {
+		fa, ft := parseFileNameArtistTitle(t.FileName) // 返回 (artist, title)
+		if title == "" || looksUnknown(title) || looksGarbled(title) {
+			title = ft
+		}
+		if artist == "" || looksUnknown(artist) || looksGarbled(artist) {
+			artist = fa
+		}
+	}
+	return title, artist
+}
+
 // fixEncodingHandler rewrites the text fields of selected tracks, repairing
 // any mojibake it can detect. When a tag cannot be repaired (double-corrupted,
 // information lost) but the filename carries a clean "artist - title", the

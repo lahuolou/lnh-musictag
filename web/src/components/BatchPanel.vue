@@ -6,6 +6,8 @@ import FormatDialog from './FormatDialog.vue'
 
 const skipFilled = ref(true)
 const fmtOpen = ref(false)
+const idBusy = ref(false)
+const idResult = ref(null)
 
 // 简繁转换
 const scriptTo = ref('trad')
@@ -49,6 +51,26 @@ async function setChorus() {
     clearSel();
     await refresh();
   } catch (e) { toast('操作失败: ' + e.message, 'err'); }
+}
+
+// 音频内容识别：无标签/无文件名信息的曲目（track01.mp3 这类），按音频指纹
+// 与库内已标注曲目匹配，命中后写入标签并抓取歌词
+async function identify() {
+  if (state.selected.size === 0) { toast('请先勾选要识别的曲目（可在列表筛选「待识别」）', 'err'); return; }
+  idBusy.value = true;
+  idResult.value = null;
+  try {
+    const r = await api('/api/identify', {
+      method: 'POST', body: JSON.stringify({ ids: [...state.selected] })
+    });
+    const rs = r.results || [];
+    const matched = rs.filter(x => x.ok).length;
+    idResult.value = { matched, total: rs.length };
+    toast('音频识别完成：' + matched + '/' + rs.length + ' 首已识别', matched ? 'ok' : 'err');
+    clearSel();
+    await refresh();
+  } catch (e) { toast('音频识别失败: ' + e.message, 'err'); }
+  finally { idBusy.value = false; }
 }
 
 // 批量补全可选字段（默认全选；已有该标签时智能跳过）
@@ -127,6 +149,15 @@ async function startBatch() {
     <div v-if="state.batchJob.status === 'done' && state.batchJob.results.some(r => !r.ok && r.message)" class="err" style="white-space:pre-wrap">
       <div v-for="(r, i) in state.batchJob.results.filter(x => !x.ok && x.message)" :key="i">{{ r.fileName }}: {{ r.message }}</div>
     </div>
+  </div>
+
+  <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
+    <div class="h3">🔊 音频内容识别</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:6px">
+      <button class="ghost sm" :disabled="idBusy" @click="identify">{{ idBusy ? '识别中…' : '识别勾选的 ' + state.selected.size + ' 首' }}</button>
+      <span class="muted">无标签、无文件名信息的曲目（如 track01.mp3），按音频内容与库内已标注曲目匹配，命中即补全标签与歌词</span>
+    </div>
+    <div v-if="idResult" class="muted" style="margin-top:6px">已识别 {{ idResult.matched }} / {{ idResult.total }} 首（识别成功即写入标签）</div>
   </div>
 
   <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">

@@ -1,8 +1,8 @@
 # LNH-MusicTag
 
-纯 **Docker 部署**的自托管 Web 音乐标签管理工具：**标签读写 + 歌曲去重 + 多源元数据/歌词刮削 + 批量修正 + 格式转换 + 异步扫描**，全部操作通过浏览器后台完成，无本地 CLI。
+纯 **Docker 部署**的自托管 Web 音乐标签管理工具：**标签读写 + 歌曲去重 + 多源元数据/歌词刮削 + 批量修正 + 格式转换 + 异步扫描 + 音频内容识别**，全部操作通过浏览器后台完成，无本地 CLI。
 
-技术栈：**Go 后端（go-taglib WASM 封装 TagLib，无 CGo）+ 纯 Go SHA256 去重 + 10 个刮削源（国内优先）+ 歌词 + Vue3 多页面前端**，配置存 **SQLite**（不依赖环境变量）。
+技术栈：**Go 后端（go-taglib WASM 封装 TagLib，无 CGo）+ 纯 Go SHA256 去重 + Chromaprint 音频指纹识别 + 10 个刮削源（国内优先）+ 歌词 + Vue3 多页面前端**，配置存 **SQLite**（不依赖环境变量）。
 
 前端用 **Vue 3 + Vite**（比 React 运行时更轻），构建产物约 90KB JS，`go:embed` 进单个静态二进制，Docker 多阶段构建（node → Go → scratch），运行时无 node 依赖、不额外占内存。
 
@@ -32,6 +32,9 @@
 | ⑳ 合唱整理 | 艺术家字段按 `/ ; 、 ， _` 拆分后 **超过 3 位 → 一键改为“合唱”** | 批量面板 |
 | ㉑ 去重增强 | 去重新增 **艺术家+标题** 维度分组；每个分组勾选多选、**手动删除**（默认保留最佳音质，绝不自动删） | 去重页 |
 | ㉒ 中文习惯优化 | **扫描中按扫描顺序稳定排列**（先扫到在前、递增在后，不乱序）；暂停/完成后点标题、艺术家等表头按 **A-Z 0-9**（中文按拼音）排序；大曲库**分页渲染**（滚动加载不卡）、封面**懒加载**、搜索自动忽略**全角/大小写**、**外挂 .lrc** 识别与一键导入、扫描自动跳过隐藏目录与 NAS 系统目录（@eaDir/#recycle/@__thumb）、去重默认不勾选并显示文件大小/时长、登录防重复提交 | 全局 |
+| ㉓ 音频内容识别 | **无标签、无文件名信息**的曲目（如 `track01.mp3`、纯数字命名）：扫描自动标记为「**待识别**」，批量页一键**按音频内容匹配**库内已标注曲目（Chromaprint 音频指纹，无需联网），命中即补全标题/艺术家/专辑/年代/流派并抓取歌词 | 批量面板 · chromaprint |
+| ㉔ 文件名回退搜索 | 标签为 `Unknown`/未知/乱码时，刮削自动改用**文件名解析**出的歌名搜索（如 `Unknown - 蓝色蝴蝶.mp3` 直接用「蓝色蝴蝶」匹配补全） | 批量/单曲刮削 |
+| ㉕ 手机适配 | 窄屏（≤900/600px）自动**单列布局**并**隐藏次要列**（专辑艺术家/LRC/风格/专辑/年份/歌词），标题/艺术家列超长截断，列表无横向溢出；**表头冻结**：滚动列表时表头始终钉在顶部 | 全局 |
 
 ## 快速开始（Docker）
 
@@ -97,7 +100,7 @@ docker pull ghcr.io/lahuolou/lnh-musictag:latest && docker restart lnh-musictag 
 
 ```
 LNH-musictag/
-  Dockerfile              # 多阶段：node 构建前端 → Go 静态编译 → alpine + ffmpeg（格式转换）
+  Dockerfile              # 多阶段：node 构建前端 → Go 静态编译 → alpine + ffmpeg + chromaprint（格式转换/音频识别）
   docker-compose.yml      # 端口 10248、音乐卷、配置卷
   .dockerignore
   main.go                 # HTTP 服务、路由、内存存储、异步扫描、多源 handler、embed dist
@@ -172,6 +175,7 @@ LNH-musictag/
 | GET | `/api/lyrics?source=&title=&artists=` | 获取歌词文本 |
 | POST | `/api/scrape/batch` | `{ids,fetchCover,fetchLyrics,source}` 批量刮削，返回 jobId |
 | GET | `/api/scrape/jobs/{id}` | 批量任务进度 |
+| POST | `/api/identify` | `{ids}` 音频内容识别：按 Chromaprint 指纹与库内已标注曲目匹配，命中写标签并抓歌词（ids 为空=全部「待识别」） |
 
 ## 已知限制
 

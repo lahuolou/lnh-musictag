@@ -273,10 +273,14 @@ func scrapeOneTrack(t *model.Track, ms *scrape.MultiSource, source string, field
 		}
 	}
 
-	title := strings.TrimSpace(t.Tags["TITLE"])
-	artist := strings.TrimSpace(t.Tags["ARTIST"])
-	query := strings.TrimSpace(title + " " + artist)
-	if query == "" {
+	// 搜索关键词：优先真实标签；标签为空/“Unknown”/乱码时回退文件名解析
+	// （如 `Unknown - 蓝色蝴蝶.mp3` → 用“蓝色蝴蝶”去刮削）。
+	title, artist := effectiveSearchTerms(t)
+	query := title
+	if artist != "" && !looksUnknown(artist) && !looksGarbled(artist) {
+		query += " " + artist
+	}
+	if strings.TrimSpace(query) == "" {
 		return "无标题/艺术家，跳过", false
 	}
 	results, err := ms.Search(source, query, 3)
