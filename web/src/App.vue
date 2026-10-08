@@ -41,16 +41,17 @@ onMounted(async () => {
       <button class="navlink" :title="theme === 'dark' ? '切换到白天模式' : '切换到黑夜模式'" @click="toggleTheme">{{ theme === 'dark' ? '🌙' : '☀️' }}</button>
       <button class="ghost sm" @click="logout">退出</button>
     </nav>
-    <div class="main">
-      <MusicTree />
-      <div class="right-panel">
-        <div class="tabs">
-          <button class="tab" :class="{ on: state.activeTab === 'edit' }" @click="tab('edit')">编辑/刮削</button>
-          <button class="tab" :class="{ on: state.activeTab === 'batch' }" @click="tab('batch')">批量</button>
-          <button class="tab" :class="{ on: state.activeTab === 'dedup' }" @click="tab('dedup')">去重</button>
-          <button class="tab" :class="{ on: state.activeTab === 'settings' }" @click="tab('settings')">设置</button>
-        </div>
-        <EditPanel v-if="state.activeTab === 'edit'" />
+    <div class="page">
+      <div class="tabs">
+        <button class="tab" :class="{ on: state.activeTab === 'list' }" @click="tab('list')">列表</button>
+        <button class="tab" :class="{ on: state.activeTab === 'edit' }" @click="tab('edit')">编辑/刮削</button>
+        <button class="tab" :class="{ on: state.activeTab === 'batch' }" @click="tab('batch')">批量</button>
+        <button class="tab" :class="{ on: state.activeTab === 'dedup' }" @click="tab('dedup')">去重</button>
+        <button class="tab" :class="{ on: state.activeTab === 'settings' }" @click="tab('settings')">设置</button>
+      </div>
+      <div class="pagebody">
+        <MusicTree v-if="state.activeTab === 'list'" />
+        <EditPanel v-else-if="state.activeTab === 'edit'" />
         <BatchPanel v-else-if="state.activeTab === 'batch'" />
         <DedupPanel v-else-if="state.activeTab === 'dedup'" />
         <Settings v-else-if="state.activeTab === 'settings'" />

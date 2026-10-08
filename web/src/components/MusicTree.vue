@@ -95,29 +95,27 @@ onBeforeUnmount(stopPoll);
 </script>
 
 <template>
-  <div class="left-panel">
-    <div class="panel" style="margin-top:0">
+  <div class="music-list">
+    <div class="ml-toolbar">
       <div class="row">
         <input type="text" v-model="scanDir" placeholder="容器内音频目录，如 /music" @keydown.enter="scan" style="min-width:0" />
         <button class="sm" @click="scan" :disabled="state.scanStatus.running">{{ state.scanStatus.running ? '扫描中' : '扫描' }}</button>
       </div>
-      <div class="loading">{{ scanMsg }}</div>
-    </div>
-
-    <div class="panel">
-      <div class="row">
+      <div class="row" style="margin-top:8px">
         <input type="text" v-model="q" placeholder="搜索标题/艺术家/专辑/文件名" style="min-width:0" />
         <button class="ghost sm" @click="renameFiles" :disabled="state.scanStatus.running" title="去重复/错误音频后缀">重命名</button>
       </div>
-      <div style="font-size:12px;color:var(--muted);margin:6px 2px">
-        曲目 {{ state.tracks.length }} · 勾选后到右侧「批量」补全
-      </div>
-      <div class="tree">
-        <TreeNode v-for="n in tree" :key="n.path" :node="n" :depth="0"
-          :collapsed="collapsed" :selected="state.selected"
-          :toggle="toggle" :openTrack="openTrack" :toggleSel="toggleSel"
-          :artists="artists" :folderCount="folderCount" />
-      </div>
+      <div class="loading">{{ scanMsg }}</div>
+    </div>
+
+    <div class="ml-head">
+      曲目 {{ state.tracks.length }} · 勾选后到「批量」补全 · 点击曲目进「编辑」
+    </div>
+    <div class="tree">
+      <TreeNode v-for="n in tree" :key="n.path" :node="n" :depth="0"
+        :collapsed="collapsed" :selected="state.selected"
+        :toggle="toggle" :openTrack="openTrack" :toggleSel="toggleSel"
+        :artists="artists" :folderCount="folderCount" />
     </div>
   </div>
 </template>

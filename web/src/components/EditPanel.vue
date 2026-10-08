@@ -183,5 +183,5 @@ const t = cur;
       </div>
     </div>
   </div>
-  <div v-else class="muted">点击左侧某一行曲目，在此编辑标签、获取歌词或刮削。</div>
+  <div v-else class="muted">在「列表」tab 点击某一行曲目，在此编辑标签、获取歌词或刮削。</div>
 </template>

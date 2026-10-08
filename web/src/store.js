@@ -5,7 +5,7 @@ export const state = reactive({
   authed: false,
   user: '',
   route: location.hash.slice(1) || '/',
-  activeTab: 'edit',
+  activeTab: 'list',
   tracks: [],
   selected: new Set(),
   sources: [],
