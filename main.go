@@ -28,6 +28,10 @@ import (
 	"LNH-musictag/internal/taglibx"
 )
 
+// AppVersion 当前版本号（与 GitHub Release tag 比较，用于“新版本提示”）。
+// 每次发布新版本时同步 bump。
+const AppVersion = "1.2.0"
+
 //go:embed web/dist
 var webFS embed.FS
 
@@ -275,6 +279,8 @@ func main() {
 	sessions := newSessionStore(cfg)
 	jobs := newJobStore()
 	scans := newScanManager()
+	updates := newUpdateChecker("lahuolou/lnh-musictag")
+	updates.Start()
 
 	mux := http.NewServeMux()
 
@@ -293,6 +299,7 @@ func main() {
 	pm.HandleFunc("POST /api/fix-encoding", fixEncodingHandler(store))
 	pm.HandleFunc("POST /api/convert-script", convertScriptHandler(store))
 	pm.HandleFunc("POST /api/identify", identifyHandler(store, ms))
+	pm.HandleFunc("GET /api/version", updates.versionHandler)
 	mux.Handle("/api/", sessions.requireAuth(csrfGuard(limitBody(pm))))
 
 	// Static UI (Vue SPA built into web/dist; /api/... routes win over this)

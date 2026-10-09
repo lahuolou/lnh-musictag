@@ -8,6 +8,8 @@ const dict = {
     // App / 导航
     brand: '🎵 LNH-MusicTag',
     tracks: '曲目 {n}',
+    newVer: '新版本',
+    newVerTitle: '发现新版本，点击查看更新内容',
     batchProgress: '批量 {d}/{t}',
     batchRunningTitle: '批量补全进行中，点击查看',
     list: '列表',
@@ -239,6 +241,8 @@ const dict = {
   en: {
     brand: '🎵 LNH-MusicTag',
     tracks: 'Tracks {n}',
+    newVer: 'New version',
+    newVerTitle: 'A new version is available, click to view the changelog',
     batchProgress: 'Batch {d}/{t}',
     batchRunningTitle: 'Batch scraping in progress, click to view',
     list: 'Library',

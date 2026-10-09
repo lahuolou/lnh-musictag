@@ -21,6 +21,15 @@ function toggleTheme() { theme.value = theme.value === 'dark' ? 'light' : 'dark'
 function tab(name) { state.activeTab = name; }
 function toggleLang() { setLang(lang.value === 'zh' ? 'en' : 'zh'); }
 
+// 新版本提示：/api/version 返回 current/latest/url，latest 与 current 不同则展示
+const ver = ref(null)
+async function loadVersion() {
+  try {
+    const v = await api('/api/version');
+    if (v.latest && v.latest !== v.current) ver.value = v;
+  } catch (e) { /* 无网络/后端不支持时静默 */ }
+}
+
 onMounted(async () => {
   applyTheme();
   try {
@@ -30,6 +39,7 @@ onMounted(async () => {
   } catch (e) {
     state.authed = false;
   }
+  loadVersion();
 });
 </script>
 
@@ -40,6 +50,10 @@ onMounted(async () => {
       <span class="brand">{{ t('brand') }}</span>
       <span class="spacer"></span>
       <span class="badge">{{ t('tracks', { n: state.tracks.length }) }}</span>
+      <!-- 新版本提示：点击跳 GitHub Releases -->
+      <a v-if="ver" class="badge newver" :href="ver.url" target="_blank" rel="noopener" :title="t('newVerTitle')">
+        ⬆ {{ t('newVer') }} v{{ ver.latest }}
+      </a>
       <!-- 全局批量进度：后台任务进行中，任意页面可见，点击回到批量页 -->
       <span v-if="state.batchJob && state.batchJob.status !== 'done'" class="badge batch" :title="t('batchRunningTitle')" @click="tab('batch')">
         {{ t('batchProgress', { d: state.batchJob.done, t: state.batchJob.total }) }}
