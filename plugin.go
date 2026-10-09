@@ -44,7 +44,7 @@ type Plugin struct {
 	Version    string            `json:"version,omitempty"`
 	Hint       string            `json:"hint,omitempty"`
 	Fields     []PluginField     `json:"fields,omitempty"`
-	Config     map[string]string `json:"config,omitempty"`
+	Config     map[string]string `json:"config"` // 始终输出（可能为空 {}），避免前端渲染崩溃
 }
 
 // applyFn 插件配置生效回调（启停/配置变更时执行）。
@@ -83,6 +83,8 @@ func pluginsSnapshot() []Plugin {
 			for k, v := range p.Config {
 				np.Config[k] = v
 			}
+		} else {
+			np.Config = map[string]string{} // 保证前端始终拿到非空 config，避免渲染崩溃
 		}
 		out = append(out, np)
 	}

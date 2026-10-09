@@ -133,7 +133,7 @@ onMounted(() => { loadPlugins(); loadFFmpeg(); });
           <div v-if="p.fields && p.fields.length" class="pfields">
             <div class="field" v-for="f in p.fields" :key="f.key" style="margin-top:6px">
               <label>{{ t(f.label) }}</label>
-              <input :type="f.type === 'password' ? 'password' : 'text'" v-model="p.config[f.key]" :placeholder="t(f.placeholder || '')" />
+              <input :type="f.type === 'password' ? 'password' : 'text'" v-model="(p.config || {})[f.key]" :placeholder="t(f.placeholder || '')" />
             </div>
             <div class="row" style="margin-top:8px">
               <button class="sm" :disabled="busy" @click="savePluginConfig(p)">{{ t('saveCfg') }}</button>
