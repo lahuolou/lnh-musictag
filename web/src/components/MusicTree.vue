@@ -40,7 +40,7 @@ const filtered = computed(() => {
   }
   if (filter.value === 'garbled') list = list.filter(isGarbled);
   else if (filter.value === 'trad') list = list.filter(isTrad);
-  else if (filter.value === 'nolyric') list = list.filter(t => !hasLyrics(t) && !t.hasLrcFile);
+  else if (filter.value === 'nolyric') list = list.filter(t => !(t.tags.LYRICS || '').trim() && !t.hasLrcFile);
   else if (filter.value === 'nocover') list = list.filter(t => !t.hasCover);
   else if (filter.value === 'noartist') list = list.filter(t => !(t.tags.ARTIST || '').trim());
   else if (filter.value === 'needsid') list = list.filter(t => t.needsIdentify);
@@ -251,21 +251,21 @@ onBeforeUnmount(stopPoll);
           </tr>
         </thead>
         <tbody>
-          <tr v-for="t in shown" :key="t.id" :class="{ on: state.selected.has(t.id) }" @click="openTrack(t)">
-            <td><input type="checkbox" class="tchk" :checked="state.selected.has(t.id)" @click.stop @change="toggleSel(t, $event)" /></td>
+          <tr v-for="item in shown" :key="item.id" :class="{ on: state.selected.has(item.id) }" @click="openTrack(item)">
+            <td><input type="checkbox" class="tchk" :checked="state.selected.has(item.id)" @click.stop @change="toggleSel(item, $event)" /></td>
             <td @click.stop>
-              <img v-if="t.hasCover" class="cov" :src="coverUrl(t.id)" loading="lazy" @click.stop="openTrack(t)" />
+              <img v-if="item.hasCover" class="cov" :src="coverUrl(item.id)" loading="lazy" @click.stop="openTrack(item)" />
               <span v-else class="covph">♪</span>
             </td>
-            <td :title="t.tags.TITLE ? t.tags.TITLE : baseName(t)">{{ displayTitle(t) }}</td>
-            <td :title="t.tags.ARTIST ? t.tags.ARTIST : nameArtist(t)">{{ displayArtist(t) }}</td>
-            <td>{{ t.tags.ALBUM || '' }}</td>
-            <td>{{ t.tags.ALBUMARTIST || '' }}</td>
-            <td>{{ hasLyrics(t) ? t('hasLyric') : t('none') }}</td>
-            <td :title="t.hasLrcFile ? t('lrcTitle') : ''">{{ lrcMark(t) }}</td>
-            <td>{{ t.tags.DATE || '' }}</td>
-            <td>{{ t.tags.GENRE || '' }}</td>
-            <td class="muted">{{ fmtSize(t.size) }}</td>
+            <td :title="item.tags.TITLE ? item.tags.TITLE : baseName(item)">{{ displayTitle(item) }}</td>
+            <td :title="item.tags.ARTIST ? item.tags.ARTIST : nameArtist(item)">{{ displayArtist(item) }}</td>
+            <td>{{ item.tags.ALBUM || '' }}</td>
+            <td>{{ item.tags.ALBUMARTIST || '' }}</td>
+            <td>{{ hasLyrics(item) ? t('hasLyric') : t('none') }}</td>
+            <td :title="item.hasLrcFile ? t('lrcTitle') : ''">{{ lrcMark(item) }}</td>
+            <td>{{ item.tags.DATE || '' }}</td>
+            <td>{{ item.tags.GENRE || '' }}</td>
+            <td class="muted">{{ fmtSize(item.size) }}</td>
           </tr>
           <tr v-if="!shown.length">
             <td colspan="11" class="muted" style="padding:16px;text-align:center">
