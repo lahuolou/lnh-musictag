@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	cstore "LNH-musictag/internal/store"
 )
 
 // convertCodecs maps target extension -> ffmpeg audio codec args.
@@ -31,8 +33,14 @@ var losslessCodecs = map[string]bool{"flac": true, "wav": true, "aiff": true, "t
 
 // convertHandler transcodes selected tracks to a target format. It starts a
 // background job so the frontend can show live progress per track.
-func convertHandler(js *jobStore, s *store) http.HandlerFunc {
+// FFmpeg is a plugin: missing binary returns a clear 400 pointing at Settings.
+func convertHandler(js *jobStore, s *store, cfg *cstore.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		bin := ffmpegBin(cfg)
+		if bin == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "未检测到 FFmpeg，请到「设置 → FFmpeg」配置路径或一键安装后再试"})
+			return
+		}
 		var req struct {
 			IDs          []string `json:"ids"`
 			Target       string   `json:"target"`
@@ -104,7 +112,7 @@ func convertHandler(js *jobStore, s *store) http.HandlerFunc {
 			dir := filepath.Dir(t.Path)
 			base := stripAudioExt(filepath.Base(t.Path))
 			dst := filepath.Join(dir, base+"."+target)
-			if err := ffmpegConvert(t.Path, dst, codec, br, sr, losslessCodecs[target]); err != nil {
+			if err := ffmpegConvert(bin, t.Path, dst, codec, br, sr, losslessCodecs[target]); err != nil {
 				return scrapeResult{ID: t.ID, FileName: t.FileName, OK: false, Message: err.Error()}
 			}
 			// 重新登记：删除原文件则替换曲目，否则新增一首
@@ -120,8 +128,8 @@ func convertHandler(js *jobStore, s *store) http.HandlerFunc {
 }
 
 // ffmpegConvert re-encodes src to dst with the given audio codec args,
-// keeping metadata tags via -map_metadata 0.
-func ffmpegConvert(src, dst, codecArgs, bitrate, sampleRate string, lossless bool) error {
+// keeping metadata tags via -map_metadata 0. bin is the resolved ffmpeg path.
+func ffmpegConvert(bin, src, dst, codecArgs, bitrate, sampleRate string, lossless bool) error {
 	parts := strings.Fields(codecArgs)
 	args := []string{"-y", "-i", src, "-map_metadata", "0", "-codec:a"}
 	args = append(args, parts...)
@@ -132,7 +140,7 @@ func ffmpegConvert(src, dst, codecArgs, bitrate, sampleRate string, lossless boo
 		args = append(args, "-ar", sampleRate)
 	}
 	args = append(args, dst)
-	cmd := exec.Command("ffmpeg", args...)
+	cmd := exec.Command(bin, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("ffmpeg: %w: %s", err, strings.TrimSpace(string(out)))

@@ -27,9 +27,12 @@ async function runToolJob(kind, url, body) {
       return;
     }
     await startToolJob(r.jobId, r.total, kind);
-    // 等待任务完成（startToolJob 立即返回，完成信号通过状态轮询到位）
+    // 等待任务完成（startToolJob 立即返回，完成信号通过状态轮询到位）。
+    // jobId 匹配检查：用户在任务完成前点了别的任务时，旧轮询立即退出，
+    // 避免"识别完成后点乱码，旧任务提示覆盖新任务"的串扰。
     const iv = setInterval(() => {
       const tj = state.toolJob;
+      if (tj && tj.id !== r.jobId) { clearInterval(iv); return; }
       if (tj && tj.finished) {
         clearInterval(iv);
         toast(t('jobDone', { ok: tj.ok, fail: tj.fail, skip: tj.skip, t: tj.total }), tj.fail === 0 ? 'ok' : 'err');
@@ -132,7 +135,8 @@ async function startBatch() {
   <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
     <button class="ghost sm" @click="clearSel">{{ t('clearSel') }}</button>
     <select v-model="state.bSource" style="padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text)">
-      <option v-for="s in state.sources" :key="s.name" :value="s.name">{{ s.label }}</option>
+      <!-- 只显示设置页开启的源插件；“自动”始终可用 -->
+      <option v-for="s in state.sources" :key="s.name" :value="s.name" v-show="s.name === 'auto' || s.enabled !== false">{{ s.label }}</option>
     </select>
     <button :disabled="state.batchBusy || state.selected.size === 0" @click="startBatch">{{ state.selected.size === 0 ? t('selBtn') : t('batchRun', { n: state.selected.size }) }}</button>
   </div>

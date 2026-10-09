@@ -28,7 +28,9 @@ Built with **Go (go-taglib WASM wrapper of TagLib, no CGo) + pure-Go SHA256 dedu
 ghcr.io/lahuolou/lnh-musictag:latest
 ```
 
-The image is built automatically from the `main` branch of the GitHub repository `lahuolou/lnh-musictag` (GitHub Actions), multi-stage build → static binary (~10 MB, scratch runtime, CA certificates included, architecture auto-matched).
+The image is built automatically from the `main` branch of the GitHub repository `lahuolou/lnh-musictag` (GitHub Actions): multi-stage build → static binary on an alpine runtime (CA certificates + Chromaprint included, architecture auto-matched).
+
+> **FFmpeg is now an optional plugin** — the image no longer bundles it. To use format conversion, either (1) mount the host's `/usr/bin` into the container and set the path in **Settings → FFmpeg Plugin**, or (2) click "Install" in the same panel (runs `apk add ffmpeg` inside the container, needs root).
 
 ### Quick deploy
 
@@ -87,10 +89,11 @@ docker run -d --name lnh-musictag --restart unless-stopped \
 | 5 | Lyrics | NetEase LRC + lrclib, auto select; get/edit/embed; batch included; external .lrc import |
 | 6 | Batch scrape | Selectable fields (cover/title/artist/genre/year/album artist/track/lyrics), smart-skip filled tracks, background job with live progress, list updates incrementally |
 | 7 | Audio-content identify | Untagged/un-named tracks (e.g. `track01.mp3`) matched by Chromaprint fingerprint against the library; optional external AcoustID lookup (set API key in Settings) |
-| 8 | File ops | Rename-to-tag (`Artist - Title.ext`), strip bad/duplicate extensions by real codec sniff (`发如雪.mp3.flac → 发如雪.flac`), format conversion (ffmpeg, 16 input / 10 output formats), mojibake repair (GBK/UTF-8), Simplified⇄Traditional (OpenCC), artist>3 → "合唱" |
+| 8 | File ops | Rename-to-tag (`Artist - Title.ext`), strip bad/duplicate extensions by real codec sniff (`发如雪.mp3.flac → 发如雪.flac`), format conversion (ffmpeg plugin, optional), mojibake repair (GBK/UTF-8), Simplified⇄Traditional (OpenCC), artist>3 → "合唱" |
 | 9 | List & UX | Sticky table header, incremental order while scanning, A-Z/0-9 sort on header click when idle, real-time search (title), filters (mojibake/traditional/no-lyrics/no-cover/no-artist), paginated rendering, lazy cover loading, mobile responsive (vertical/landscape) |
 | 10 | Theme | Dark/light modern flat UI, language toggle 中/EN |
 | 11 | Security | Salted password hashing (auto-migrates legacy plaintext), login rate limiting, CSRF guard, security headers (CSP/nosniff/X-Frame), request size limits, parameterized SQL, no shell command injection |
+| 12 | Plugin system | All scraping sources are plugin-style toggles in **Settings** (no code changes to add/remove); FFmpeg is an installable/configurable tool plugin; a generic plugin API (`GET/POST /api/plugins`) reserves `download` / `protocol` kinds for future plugins (downloaders, auto-switch strategy, Subsonic, …) |
 
 ### Scraping sources
 
@@ -112,6 +115,8 @@ docker run -d --name lnh-musictag --restart unless-stopped \
 | GET | `/api/scrape/jobs/{id}` `/api/scrape/search` `/api/scrape/sources` | Job progress / search / sources |
 | GET | `/api/lyrics` | Fetch lyrics |
 | POST | `/api/convert` `/api/fix-encoding` `/api/convert-script` `/api/set-chorus` `/api/identify` | Convert / fix mojibake / script convert / chorus / identify |
+| GET/POST | `/api/plugins` | List / toggle / configure all plugins (scrape sources, FFmpeg, reserved kinds) |
+| GET | `/api/ffmpeg/status` · POST `/api/ffmpeg/install` | FFmpeg probe · one-click install (container) |
 | GET/POST | `/api/settings` | Read/write settings (DB-backed) |
 | POST | `/api/change-password` | Change password |
 
@@ -150,7 +155,9 @@ go build -o lnh .                        # embed frontend + build binary
 ghcr.io/lahuolou/lnh-musictag:latest
 ```
 
-镜像由 GitHub 仓库 `lahuolou/lnh-musictag` 的 `main` 分支自动构建推送（GitHub Actions），多阶段构建的静态二进制（约 10MB，scratch 运行层，带 CA 证书，按目标机架构自动适配）。
+镜像由 GitHub 仓库 `lahuolou/lnh-musictag` 的 `main` 分支自动构建推送（GitHub Actions）：多阶段构建 → 静态二进制 + alpine 运行层（内置 CA 证书与 Chromaprint，按目标机架构自动适配）。
+
+> **FFmpeg 已改为可选插件**——镜像不再捆绑。需要「格式转换」时：① 把宿主机 `/usr/bin` 挂载进容器并在「设置 → FFmpeg 插件」填路径；② 或在同一面板点「一键安装」（容器内执行 `apk add ffmpeg`，需 root 权限）。
 
 ### 快速部署
 
@@ -209,10 +216,11 @@ docker run -d --name lnh-musictag --restart unless-stopped \
 | 5 | 歌词 | 网易云 LRC + lrclib 自动选择；单曲获取/编辑/嵌入；批量可选；外挂 .lrc 一键导入 |
 | 6 | 批量补全 | 字段可选（海报/歌名/艺术家/流派/年代/专辑艺术家/曲目号/歌词）、智能跳过已填曲目、后台运行、进度实时可见、列表增量更新 |
 | 7 | 音频内容识别 | 无标签/无文件名信息的曲目（如 `track01.mp3`）按 Chromaprint 指纹与库内已标注曲目匹配；可选外部 AcoustID 听声识曲（设置页填 Key） |
-| 8 | 文件处理 | 保存即重命名（`艺术家 - 标题.后缀`）；按真实编码去重复/错误后缀（`发如雪.mp3.flac → 发如雪.flac`）；格式转换（ffmpeg，16 输入/10 输出格式）；乱码修复（GBK/UTF-8）；简繁体转换（OpenCC）；艺术家>3 位 → 一键改「合唱」 |
+| 8 | 文件处理 | 保存即重命名（`艺术家 - 标题.后缀`）；按真实编码去重复/错误后缀（`发如雪.mp3.flac → 发如雪.flac`）；格式转换（ffmpeg 可选插件）；乱码修复（GBK/UTF-8）；简繁体转换（OpenCC）；艺术家>3 位 → 一键改「合唱」 |
 | 9 | 列表与体验 | 表头冻结；扫描中递增排序不乱序，暂停/完成后点表头 A-Z 0-9（中文按拼音）；输入即搜歌名；筛选（乱码/繁体/无歌词/无封面/无艺术家）；分页渲染不卡、封面懒加载；手机横竖屏适配 |
 | 10 | 主题与语言 | 黑/白现代扁平主题；界面中英双语一键切换 |
 | 11 | 安全加固 | 密码加盐哈希存储（旧明文自动迁移）、登录失败限流、CSRF 防护、安全响应头（CSP/nosniff/X-Frame）、请求体大小限制、SQL 全参数化、命令无注入风险 |
+| 12 | 插件系统 | 全部刮削源改为插件式开关（设置页直接启停，无需改代码）；FFmpeg 为可安装/可配置工具插件；通用插件接口（`GET/POST /api/plugins`）预留 download/protocol 两类，后续接入下载器、自动换源、Subsonic 等插件 |
 
 ### 刮削源清单
 
@@ -234,6 +242,8 @@ docker run -d --name lnh-musictag --restart unless-stopped \
 | GET | `/api/scrape/jobs/{id}` `/api/scrape/search` `/api/scrape/sources` | 任务进度 / 搜索 / 源列表 |
 | GET | `/api/lyrics` | 获取歌词 |
 | POST | `/api/convert` `/api/fix-encoding` `/api/convert-script` `/api/set-chorus` `/api/identify` | 转换 / 乱码修复 / 简繁转换 / 合唱 / 音频识别 |
+| GET/POST | `/api/plugins` | 插件列表 / 启停与配置（刮削源、FFmpeg、预留类型） |
+| GET | `/api/ffmpeg/status` · POST `/api/ffmpeg/install` | FFmpeg 探测 · 容器内一键安装 |
 | GET/POST | `/api/settings` | 读写配置（存数据库） |
 | POST | `/api/change-password` | 修改密码 |
 
@@ -241,7 +251,7 @@ docker run -d --name lnh-musictag --restart unless-stopped \
 
 - **后端**：Go 1.22、`go.senan.xyz/taglib`（WASM）、`modernc.org/sqlite`（纯 Go）、Chromaprint（fpcalc）、ffmpeg（格式转换，可选）
 - **前端**：Vue 3 + Vite（运行时轻量，约 130KB JS，`go:embed` 进单个静态二进制）
-- **运行时**：Docker 多阶段（node → Go → scratch），运行时无 node 依赖
+- **运行时**：Docker 多阶段（node → Go → alpine），运行时无 node 依赖；FFmpeg 可选安装
 
 ### 本地开发
 

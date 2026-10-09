@@ -32,10 +32,12 @@ import (
 // AppVersion 当前版本号（与 GitHub Release tag 比较，用于“新版本提示”）。
 // 每次发布新版本时同步 bump（发布流程约束：推送前 bump 版本并打对应 Release tag，
 // 否则项目内“检查更新”会因 current==latest 而检测不到新版本）。
-const AppVersion = "1.3.0"
+const AppVersion = "1.4.0"
 
 //go:embed web/dist
 var webFS embed.FS
+
+var installMu sync.Mutex // ffmpeg 安装串行锁
 
 type store struct {
 	mu     sync.RWMutex
@@ -277,6 +279,10 @@ func main() {
 		loadTracksFromDB(store, cfg.DB())
 	}
 	ms := scrape.NewMultiSource()
+	// 插件框架：注册内置插件（刮削源 + FFmpeg），再从设置库恢复启停/配置
+	// （首次启动自动迁移旧的 sources_enabled / ffmpeg_path 键）
+	registerBuiltinPlugins(cfg, ms)
+	loadPluginsFromDB(cfg)
 
 	if k, ok := cfg.Get("acoustid_key"); ok && k != "" {
 		ms.Client().AcoustIDAPIKey = k
@@ -322,7 +328,25 @@ func main() {
 	pm.HandleFunc("GET /api/scrape/sources", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, ms.Sources())
 	})
-	pm.HandleFunc("POST /api/convert", convertHandler(jobs, store))
+	// 通用插件设置接口：列出/启停/配置全部插件（刮削源、FFmpeg、预留类型）
+	pm.HandleFunc("GET /api/plugins", pluginsHandler)
+	pm.HandleFunc("POST /api/plugins", pluginsUpdateHandler(cfg))
+	pm.HandleFunc("POST /api/convert", convertHandler(jobs, store, cfg))
+	pm.HandleFunc("GET /api/ffmpeg/status", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, ffmpegStatus(cfg))
+	})
+	pm.HandleFunc("POST /api/ffmpeg/install", func(w http.ResponseWriter, r *http.Request) {
+		// 串行安装锁：同一时间只允许一次安装
+		installMu.Lock()
+		defer installMu.Unlock()
+		out, err := installFFmpeg()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "安装失败: " + err.Error(), "output": out})
+			return
+		}
+		bin := ffmpegBin(cfg)
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "output": out, "path": bin, "version": ffmpegVersion(bin)})
+	})
 	pm.HandleFunc("POST /api/fix-encoding", fixEncodingHandler(jobs, store))
 	pm.HandleFunc("POST /api/convert-script", convertScriptHandler(jobs, store))
 	pm.HandleFunc("POST /api/identify", identifyHandler(jobs, store, ms))
@@ -434,6 +458,7 @@ func main() {
 			"autoFixTitle":    cfg.GetDefault("auto_fix_title", "1") == "1",
 			"autoRenameFile":  cfg.GetDefault("auto_rename_file", "1") == "1",
 			"scanDir":         cfg.GetDefault("scan_dir", "/music"),
+			"ffmpegPath":      cfg.GetDefault("ffmpeg_path", ""),
 		})
 	})
 	pm.HandleFunc("POST /api/settings", func(w http.ResponseWriter, r *http.Request) {
@@ -448,6 +473,7 @@ func main() {
 			AutoFixTitle    *bool   `json:"autoFixTitle"`
 			AutoRenameFile  *bool   `json:"autoRenameFile"`
 			ScanDir         *string `json:"scanDir"`
+			FFmpegPath      *string `json:"ffmpegPath"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -500,6 +526,9 @@ func main() {
 			if d := strings.TrimSpace(*req.ScanDir); d != "" {
 				cfg.Set("scan_dir", d)
 			}
+		}
+		if req.FFmpegPath != nil {
+			cfg.Set("ffmpeg_path", strings.TrimSpace(*req.FFmpegPath))
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "已保存"})
 	})
@@ -980,6 +1009,43 @@ func (s *store) allTracksCount() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return len(s.tracks)
+}
+
+// renameTrack 在乱码修复把文件重命名后调用：更新 store 的路径索引、重读
+// 新路径标签（保持 ID 不变，列表选中/去重索引不失效），并同步 SQLite。
+func renameTrack(s *store, t *model.Track, newPath string) {
+	s.mu.Lock()
+	oldPath := t.Path
+	if id, ok := s.byPath[oldPath]; ok && id == t.ID {
+		delete(s.byPath, oldPath)
+	}
+	t.Path = newPath
+	t.FileName = filepath.Base(newPath)
+	s.byPath[newPath] = t.ID
+	order := s.order[t.ID]
+	db := s.db
+	s.mu.Unlock()
+	// 库内删除旧路径行（同一 id 保持 seq 重新 upsert）
+	deleteTrackDB(db, s, "", oldPath)
+	if nt, err := taglibx.ReadTrackLight(newPath); err == nil {
+		nt.ID = t.ID // 保持原 ID：列表勾选/去重索引不因重命名失效
+		nt.SHA256 = t.SHA256
+		nt.HasTrad = detectTraditional(nt.Tags)
+		nt.Garbled = looksGarbledTags(nt)
+		nt.NeedsIdentify = needsIdentify(nt)
+		s.mu.Lock()
+		s.tracks[t.ID] = nt
+		s.byPath[newPath] = nt.ID
+		if _, ok := s.order[nt.ID]; !ok {
+			s.order[nt.ID] = order
+		}
+		db2 := s.db
+		s.mu.Unlock()
+		upsertTrackDB(db2, s, nt)
+	} else {
+		// 新路径读取失败：原对象仍可用（路径已更新），仅落库
+		upsertTrackDB(db, s, t)
+	}
 }
 
 // refreshTrack re-reads a track's tags/properties after a write.

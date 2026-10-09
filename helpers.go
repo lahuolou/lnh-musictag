@@ -48,6 +48,12 @@ func fetchBytes(u string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
+// fileExists reports whether a regular file exists at path.
+func fileExists(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && !fi.IsDir()
+}
+
 // stripAudioExt removes trailing audio file extensions (case-insensitive),
 // repeatedly, e.g. "广岛之恋.mp3" -> "广岛之恋" and "发如雪.mp3.flac" ->
 // "发如雪". Non-audio extensions or strings without one are returned unchanged.

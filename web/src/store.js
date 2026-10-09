@@ -88,6 +88,7 @@ export async function startBatchPoll(jobId) {
         toast(t('batchFinish', { ok, fail, skip, t: job.total }), fail === 0 ? 'ok' : 'err');
         state.selected.clear();
         state.batchJob = null;
+        state.batchBusy = false; // 完成必须解锁，否则批量/识别等按钮一直禁用
         await refresh(); // 兜底同步一次，保证与后端完全一致
       }
     } catch (e) {

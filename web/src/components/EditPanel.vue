@@ -182,7 +182,7 @@ function srcLabel(name) { return (state.sources.find(s => s.name === name) || { 
     <label style="margin-top:14px">{{ t('searchScrape') }}</label>
     <div class="row">
       <select v-model="sSource" style="padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);min-width:120px">
-        <option v-for="s in state.sources" :key="s.name" :value="s.name">{{ s.label }}</option>
+        <option v-for="s in state.sources" :key="s.name" :value="s.name" v-show="s.name === 'auto' || s.enabled !== false">{{ s.label }}</option>
       </select>
       <input type="text" v-model="sQuery" :placeholder="t('searchPlaceholder')" @keydown.enter="mbSearch" />
       <button class="sm" @click="mbSearch">{{ t('search') }}</button>

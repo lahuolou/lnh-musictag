@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 )
 
@@ -35,17 +36,22 @@ type Source interface {
 	Search(c *Client, query string, limit int) ([]SearchResult, error)
 }
 
-// SourceInfo is the public descriptor of a source for the UI dropdown.
+// SourceInfo is the public descriptor of a source for the UI (dropdown /
+// settings toggles). Enabled mirrors the persisted plugin switch: disabled
+// sources are skipped by auto and rejected when selected directly.
 type SourceInfo struct {
-	Name  string `json:"name"`
-	Label string `json:"label"`
+	Name    string `json:"name"`
+	Label   string `json:"label"`
+	Enabled bool   `json:"enabled"`
 }
 
 // MultiSource aggregates domestic + international scrape sources.
 type MultiSource struct {
-	client *Client
-	byName map[string]Source
-	order  []string
+	client  *Client
+	byName  map[string]Source
+	order   []string
+	enabled map[string]bool // 插件式开关：false 的源在 auto 中跳过、直接选择时报错
+	emu     sync.RWMutex
 }
 
 // Source preference groups used by auto: Chinese queries hit domestic sources
@@ -54,9 +60,10 @@ var domesticOrder = []string{"netease", "qq", "kugou", "kuwo", "migu", "bilibili
 var internationalOrder = []string{"itunes", "musicbrainz", "listenbrainz", "deezer", "lastfm", "spotify", "discogs", "jamendo"}
 
 // NewMultiSource registers all built-in sources (domestic first so the UI
-// dropdown and auto mode both prefer Chinese services).
+// dropdown and auto mode both prefer Chinese services). Every source starts
+// enabled; the settings page can switch any of them off.
 func NewMultiSource() *MultiSource {
-	m := &MultiSource{client: NewClient(), byName: map[string]Source{}}
+	m := &MultiSource{client: NewClient(), byName: map[string]Source{}, enabled: map[string]bool{}}
 	m.register(neteaseSource{})
 	m.register(qqSource{})
 	m.register(kugouSource{})
@@ -74,7 +81,24 @@ func NewMultiSource() *MultiSource {
 	m.register(spotifySource{})
 	m.register(discogsSource{})
 	m.register(jamendoSource{})
+	for _, n := range m.order {
+		m.enabled[n] = true
+	}
 	return m
+}
+
+// SetEnabled turns a source plugin on/off (persisted by the caller in config).
+func (m *MultiSource) SetEnabled(name string, on bool) {
+	m.emu.Lock()
+	defer m.emu.Unlock()
+	m.enabled[name] = on
+}
+
+// IsEnabled reports whether a source plugin is currently switched on.
+func (m *MultiSource) IsEnabled(name string) bool {
+	m.emu.RLock()
+	defer m.emu.RUnlock()
+	return m.enabled[name]
 }
 
 func (m *MultiSource) register(s Source) {
@@ -87,12 +111,14 @@ func (m *MultiSource) register(s Source) {
 // Client exposes the shared HTTP client for callers that need it.
 func (m *MultiSource) Client() *Client { return m.client }
 
-// Sources returns the ordered source list (for the UI dropdown).
+// Sources returns the ordered source list (for the UI dropdown / settings),
+// including the always-on "auto" pseudo-source.
 func (m *MultiSource) Sources() []SourceInfo {
-	out := []SourceInfo{{Name: "auto", Label: "自动"}}
+	m.emu.RLock()
+	defer m.emu.RUnlock()
+	out := []SourceInfo{{Name: "auto", Label: "自动", Enabled: true}}
 	for _, n := range m.order {
-		s := m.byName[n]
-		out = append(out, SourceInfo{Name: n, Label: s.Label()})
+		out = append(out, SourceInfo{Name: n, Label: m.byName[n].Label(), Enabled: m.enabled[n]})
 	}
 	return out
 }
@@ -109,7 +135,8 @@ func hasCJK(s string) bool {
 
 // Search runs a source by name. "auto" (or empty) prefers sources by language:
 // Chinese queries try domestic sources first, foreign/Latin queries try
-// international sources first, falling back to the other group.
+// international sources first, falling back to the other group. Disabled
+// plugin sources are skipped in auto mode and rejected when named directly.
 func (m *MultiSource) Search(name, query string, limit int) ([]SearchResult, error) {
 	if name == "" {
 		name = "auto"
@@ -118,6 +145,9 @@ func (m *MultiSource) Search(name, query string, limit int) ([]SearchResult, err
 		s, ok := m.byName[name]
 		if !ok {
 			return nil, fmt.Errorf("unknown source %q", name)
+		}
+		if !m.IsEnabled(name) {
+			return nil, fmt.Errorf("source %q is disabled, enable it in Settings first", name)
 		}
 		return s.Search(m.client, query, limit)
 	}
@@ -130,7 +160,7 @@ func (m *MultiSource) Search(name, query string, limit int) ([]SearchResult, err
 	var lastErr error
 	for _, n := range order {
 		s, ok := m.byName[n]
-		if !ok {
+		if !ok || !m.IsEnabled(n) {
 			continue
 		}
 		res, err := s.Search(m.client, query, limit)

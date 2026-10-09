@@ -22,11 +22,16 @@ COPY --from=fe /fe/dist ./web/dist
 RUN apk add --no-cache ca-certificates \
  && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/lnh-musictag .
 
-# ---- 运行阶段：alpine + ffmpeg + chromaprint ----
+# ---- 运行阶段：alpine（FFmpeg 改为可选插件，见下方说明） ----
 FROM alpine:3.20
-# ffmpeg 供格式转换；chromaprint 提供 fpcalc 供“音频内容识别”；
-# ca-certificates 供应用 HTTPS 访问 MusicBrainz/网易云/QQ 等刮削源
-RUN apk add --no-cache ca-certificates ffmpeg chromaprint
+# 默认仅装运行必需：ca-certificates（HTTPS 刮削源）+ chromaprint（fpcalc，
+# 供“音频内容识别”）。
+# FFmpeg 已从镜像移除：格式转换改为插件式——在「设置 → FFmpeg」里
+# ① 填写宿主机的 ffmpeg 绝对路径（将 /usr/bin 映射进容器即可），或
+# ② 点击“一键安装”（容器内 apk add --no-cache ffmpeg，需要 root 用户）。
+# 如希望镜像内置 ffmpeg，把下面这行取消注释后自行构建：
+# RUN apk add --no-cache ffmpeg
+RUN apk add --no-cache ca-certificates chromaprint
 COPY --from=build /out/lnh-musictag /lnh-musictag
 
 EXPOSE 10248

@@ -74,16 +74,21 @@ func fieldsFromList(list []string, fetchCover, fetchLyrics bool) ScrapeFields {
 	}
 }
 
-// trackHasField reports whether a track already carries a value for field.
+// trackHasField reports whether a track already carries a usable value for
+// field. Mojibake text is NOT a usable value: garbled tags are treated as
+// missing so scraping/repair can overwrite them (previously the smart-skip
+// protected broken labels and the "乱码修复/批量补全" never touched them).
 // field is a taglibx constant (e.g. taglibx.Title) or "cover"/"lyrics".
 func trackHasField(t *model.Track, field string) bool {
 	switch field {
 	case "cover":
 		return t.HasCover
 	case "lyrics":
-		return strings.TrimSpace(t.Tags["LYRICS"]) != ""
+		v := strings.TrimSpace(t.Tags["LYRICS"])
+		return v != "" && !looksGarbledText(v)
 	default:
-		return strings.TrimSpace(t.Tags[field]) != ""
+		v := strings.TrimSpace(t.Tags[field])
+		return v != "" && !looksGarbledText(v)
 	}
 }
 

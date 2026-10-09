@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"unicode"
 	"unicode/utf8"
 
@@ -48,12 +50,40 @@ func cjkCount(s string) int {
 	return n
 }
 
+// rareHanCount 统计生僻汉字数量：不在 GBK 字符集、或 GBK 码位落在 GB2312
+// 二级区（首字节 ≥ 0xD8）的字视为生僻。GBK/UTF-8 误读产生的"误读字"大多
+// 落在二级区，而正常歌曲标题/歌手名基本用一级常用字——这是区分"正常中文"
+// 与"GBK 误读中文"最可靠的廉价信号（纯按 CJK 数量评分会把误读当正常）。
+var rareCache sync.Map // rune -> int（1=生僻）
+
+func rareHanCount(s string) int {
+	n := 0
+	for _, r := range s {
+		if !unicode.Is(unicode.Han, r) {
+			continue
+		}
+		if v, ok := rareCache.Load(r); ok {
+			n += v.(int)
+			continue
+		}
+		rare := 1
+		if b, err := simplifiedchinese.GBK.NewEncoder().Bytes([]byte(string(r))); err == nil && len(b) == 2 && b[0] < 0xD8 {
+			rare = 0 // GB2312 一级区（常用字）
+		}
+		rareCache.Store(r, rare)
+		n += rare
+	}
+	return n
+}
+
 // fixMojibake attempts to repair garbled Chinese tags caused by GBK/UTF-8
-// encoding mixups. It scores each candidate by how much it looks like clean
-// Chinese (more CJK, fewer non-CJK chars) and keeps the best, so already-good
-// text is left untouched and only genuine mojibake is rewritten. It also tries
-// double-pass chains (e.g. GBK->UTF8->GBK->UTF8) that produce the classic
-// "锟斤拷" corruption.
+// encoding mixups. Each candidate is scored by how much it looks like clean
+// common Chinese: more common (GB2312 level-1) Han, fewer non-Han / kana /
+// rare characters. Mojibake output is full of rare characters, so clean text
+// is left untouched while genuine corruption is rewritten. Candidates that
+// cannot be encoded back to GBK (e.g. contain Cyrillic) are rejected. It also
+// tries double-pass chains (e.g. GBK->UTF8->GBK->UTF8) that produce the
+// classic "锟斤拷" corruption.
 func fixMojibake(s string) string {
 	if s == "" {
 		return s
@@ -67,7 +97,8 @@ func fixMojibake(s string) string {
 				kana++
 			}
 		}
-		return cj*3 - (total-cj)*3 - kana*5
+		rare := rareHanCount(c)
+		return cj*3 - (total-cj)*3 - kana*5 - rare*10
 	}
 
 	// 字符串全在 Latin-1 范围：很可能是 UTF-8/GBK 字节被按 Latin-1 读出。
@@ -86,10 +117,15 @@ func fixMojibake(s string) string {
 	// 含非 Latin-1 字符：尝试 GBK/UTF-8 错读还原，按得分取最优。
 	best, bestScore := s, score(s)
 	try := func(c string) {
-		if c != "" && c != s && utf8.ValidString(c) && !strings.ContainsRune(c, '\uFFFD') {
-			if sc := score(c); sc > bestScore {
-				best, bestScore = c, sc
-			}
+		if c == "" || c == s || !utf8.ValidString(c) || strings.ContainsRune(c, '\uFFFD') {
+			return
+		}
+		// 候选含 GBK 之外的字符（如西里尔字母）→ 不可信，丢弃
+		if _, err := simplifiedchinese.GBK.NewEncoder().Bytes([]byte(c)); err != nil {
+			return
+		}
+		if sc := score(c); sc > bestScore {
+			best, bestScore = c, sc
 		}
 	}
 	// 情形 A：UTF-8 字节被按 GBK 读出（"浣犲ソ"）→ 再编码为 GBK、按 UTF-8 解码
@@ -153,6 +189,13 @@ func looksGarbled(s string) bool {
 	return false
 }
 
+// looksGarbledText 统一判定"乱码文本"：命中乱码特征标记（FFFD/注音/符号/
+// Latin-1 误读区），或 fixMojibake 能还原（GBK/UTF-8 错读但字节信息仍在）。
+// 智能跳过、乱码筛选、文件名修复、编辑页回退共用同一套口径。
+func looksGarbledText(s string) bool {
+	return looksGarbled(s) || fixMojibake(s) != s
+}
+
 // looksGarbledTags reports whether any of a track's visible text fields
 // (filename + title/artist/album/albumartist tags) is mojibake. It combines
 // the cheap marker check with "could be repaired by fixMojibake", so GBK/UTF-8
@@ -168,10 +211,7 @@ func looksGarbledTags(t *model.Track) bool {
 		if s == "" {
 			continue
 		}
-		if looksGarbled(s) {
-			return true
-		}
-		if fixMojibake(s) != s {
+		if looksGarbledText(s) {
 			return true
 		}
 	}
@@ -288,10 +328,42 @@ func fixEncodingHandler(js *jobStore, s *store) http.HandlerFunc {
 					m[k] = []string{f}
 				}
 			}
+			// 先写标签（写入当前路径；若有重命名，标签先写好再移动文件）
 			if len(m) > 0 {
 				if err := taglibx.WriteTags(t.Path, m, false); err != nil {
 					return scrapeResult{ID: t.ID, FileName: t.FileName, OK: false, Message: "写标签失败: " + err.Error()}
 				}
+			}
+			// 文件名乱码修复：文件名（去音频后缀）是乱码 → 修复并重命名。
+			// 列表显示的就是文件名，不修文件名用户看到的乱码不会消失。
+			renamed := ""
+			base := stripAudioExt(t.FileName)
+			ext := t.Ext
+			if ext == "" {
+				ext = filepath.Ext(t.FileName)
+			}
+			if looksGarbledText(base) {
+				if f := fixMojibake(base); f != "" && f != base && !strings.ContainsRune(f, '\uFFFD') && !looksGarbled(f) {
+					newPath := filepath.Join(filepath.Dir(t.Path), f+ext)
+					if newPath != t.Path && !fileExists(newPath) {
+						if err := os.Rename(t.Path, newPath); err == nil {
+							renamed = f
+							// renameTrack 更新 store 路径 + 重读新路径标签 + 落库，
+							// 保持原 ID（不再 refreshTrack，避免路径变化产生重复行）
+							renameTrack(s, t, newPath)
+						}
+					}
+				}
+			}
+			if renamed != "" {
+				parts := []string{}
+				if len(changed) > 0 {
+					parts = append(parts, fmt.Sprintf("修复 %d 个字段", len(changed)))
+				}
+				parts = append(parts, "文件名→"+renamed)
+				return scrapeResult{ID: t.ID, FileName: t.FileName, OK: true, Message: strings.Join(parts, "，")}
+			}
+			if len(m) > 0 {
 				refreshTrack(s, t.Path)
 				return scrapeResult{ID: t.ID, FileName: t.FileName, OK: true, Message: fmt.Sprintf("修复 %d 个字段", len(changed))}
 			}
