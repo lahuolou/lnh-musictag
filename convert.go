@@ -29,8 +29,9 @@ var convertCodecs = map[string]string{
 // losslessCodecs ignore bitrate settings.
 var losslessCodecs = map[string]bool{"flac": true, "wav": true, "aiff": true, "tta": true}
 
-// convertHandler transcodes selected tracks to a target format.
-func convertHandler(s *store) http.HandlerFunc {
+// convertHandler transcodes selected tracks to a target format. It starts a
+// background job so the frontend can show live progress per track.
+func convertHandler(js *jobStore, s *store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			IDs          []string `json:"ids"`
@@ -72,30 +73,31 @@ func convertHandler(s *store) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid sample rate"})
 			return
 		}
-
 		list := resolveTracks(s, req.IDs)
-		type res struct {
-			ID     string `json:"id"`
-			Before string `json:"before"`
-			After  string `json:"after"`
-			OK     bool   `json:"ok"`
-			Error  string `json:"error,omitempty"`
+		if len(list) == 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请至少勾选一首曲目"})
+			return
 		}
-		results := []res{}
-		for _, t := range list {
+		target0 := strings.ToLower(strings.TrimSpace(req.Target))
+		if target0 == "keep" {
+			target0 = ""
+		}
+		job := js.runProgressJob(len(list), func(j *scrapeJob, i int) scrapeResult {
+			t := list[i]
+			j.mu.Lock()
+			j.Current = t.FileName
+			j.mu.Unlock()
 			srcExt := strings.ToLower(strings.TrimPrefix(t.Ext, "."))
-			// 输入格式过滤
 			if len(inSet) > 0 && !inSet[srcExt] {
-				continue
+				return scrapeResult{ID: t.ID, FileName: t.FileName, OK: false, Message: "跳过（输入格式不在所选范围）"}
 			}
-			target := strings.ToLower(strings.TrimSpace(req.Target))
-			if target == "keep" || target == "" {
+			target := target0
+			if target == "" {
 				target = srcExt
 			}
 			codec, ok := convertCodecs[target]
 			if !ok {
-				results = append(results, res{ID: t.ID, Before: t.FileName, Error: "不支持的目标格式: " + target})
-				continue
+				return scrapeResult{ID: t.ID, FileName: t.FileName, OK: false, Message: "不支持的目标格式: " + target}
 			}
 			// 已是目标格式：仍可按比特率/采样率重编码
 			same := strings.EqualFold(srcExt, target)
@@ -103,8 +105,7 @@ func convertHandler(s *store) http.HandlerFunc {
 			base := stripAudioExt(filepath.Base(t.Path))
 			dst := filepath.Join(dir, base+"."+target)
 			if err := ffmpegConvert(t.Path, dst, codec, br, sr, losslessCodecs[target]); err != nil {
-				results = append(results, res{ID: t.ID, Before: t.FileName, Error: err.Error()})
-				continue
+				return scrapeResult{ID: t.ID, FileName: t.FileName, OK: false, Message: err.Error()}
 			}
 			// 重新登记：删除原文件则替换曲目，否则新增一首
 			if req.RemoveSource && !same {
@@ -112,9 +113,9 @@ func convertHandler(s *store) http.HandlerFunc {
 				os.Remove(t.Path)
 			}
 			refreshTrack(s, dst)
-			results = append(results, res{ID: t.ID, Before: t.FileName, After: filepath.Base(dst), OK: true})
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"total": len(results), "results": results})
+			return scrapeResult{ID: t.ID, FileName: t.FileName, OK: true, Message: "已转换 → " + strings.ToUpper(target)}
+		})
+		writeJSON(w, http.StatusOK, map[string]any{"jobId": job.ID, "total": job.Total})
 	}
 }
 

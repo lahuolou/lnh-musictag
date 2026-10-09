@@ -113,7 +113,8 @@ type identifyResult struct {
 
 // identifyHandler matches selected (or all unknown) tracks against the tagged
 // library by audio fingerprint, copies the matched tags and fetches lyrics.
-func identifyHandler(s *store, ms *scrape.MultiSource) http.HandlerFunc {
+// Runs as a background job with per-track progress.
+func identifyHandler(js *jobStore, s *store, ms *scrape.MultiSource) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			IDs []string `json:"ids"`
@@ -139,50 +140,25 @@ func identifyHandler(s *store, ms *scrape.MultiSource) http.HandlerFunc {
 			}
 		}
 		if len(targets) == 0 {
-			writeJSON(w, http.StatusOK, map[string]any{"results": []identifyResult{}, "total": 0})
+			writeJSON(w, http.StatusOK, map[string]any{"jobId": "", "total": 0})
 			return
 		}
 
 		buildIdentifyBase(s, fp)
 
-		type pair struct {
-			t  *model.Track
-			fp string
-		}
-		// 目标指纹并行计算
-		results := make([]identifyResult, 0, len(targets))
-		var mu sync.Mutex
-		workers := runtime.NumCPU()
-		if workers > 4 {
-			workers = 4
-		}
-		ch := make(chan pair)
-		var wg sync.WaitGroup
-		for i := 0; i < workers; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for p := range ch {
-					res := matchAndWrite(s, ms, p.t, p.fp, identifyBase)
-					mu.Lock()
-					results = append(results, res)
-					mu.Unlock()
-				}
-			}()
-		}
-		for _, t := range targets {
+		job := js.runProgressJob(len(targets), func(j *scrapeJob, i int) scrapeResult {
+			t := targets[i]
+			j.mu.Lock()
+			j.Current = t.FileName
+			j.mu.Unlock()
 			f, err := fp.Fingerprint(t.Path)
 			if err != nil {
-				mu.Lock()
-				results = append(results, identifyResult{ID: t.ID, FileName: t.FileName, OK: false, Message: "指纹计算失败: " + err.Error()})
-				mu.Unlock()
-				continue
+				return scrapeResult{ID: t.ID, FileName: t.FileName, OK: false, Message: "指纹计算失败: " + err.Error()}
 			}
-			ch <- pair{t, f}
-		}
-		close(ch)
-		wg.Wait()
-		writeJSON(w, http.StatusOK, map[string]any{"results": results, "total": len(targets)})
+			res := matchAndWrite(s, ms, t, f, identifyBase)
+			return scrapeResult{ID: t.ID, FileName: t.FileName, OK: res.OK, Message: res.Message}
+		})
+		writeJSON(w, http.StatusOK, map[string]any{"jobId": job.ID, "total": job.Total})
 	}
 }
 

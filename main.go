@@ -292,13 +292,14 @@ func main() {
 	pm.HandleFunc("POST /api/change-password", sessions.changePasswordHandler)
 	pm.HandleFunc("POST /api/scrape/batch", batchScrapeHandler(jobs, store, ms))
 	pm.HandleFunc("GET /api/scrape/jobs/{id}", jobProgressHandler(jobs))
+	pm.HandleFunc("GET /api/jobs/{id}", jobProgressHandler(jobs)) // 通用后台任务进度（转换/识别/乱码/简繁）
 	pm.HandleFunc("GET /api/scrape/sources", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, ms.Sources())
 	})
-	pm.HandleFunc("POST /api/convert", convertHandler(store))
-	pm.HandleFunc("POST /api/fix-encoding", fixEncodingHandler(store))
-	pm.HandleFunc("POST /api/convert-script", convertScriptHandler(store))
-	pm.HandleFunc("POST /api/identify", identifyHandler(store, ms))
+	pm.HandleFunc("POST /api/convert", convertHandler(jobs, store))
+	pm.HandleFunc("POST /api/fix-encoding", fixEncodingHandler(jobs, store))
+	pm.HandleFunc("POST /api/convert-script", convertScriptHandler(jobs, store))
+	pm.HandleFunc("POST /api/identify", identifyHandler(jobs, store, ms))
 	pm.HandleFunc("GET /api/version", updates.versionHandler)
 	mux.Handle("/api/", sessions.requireAuth(csrfGuard(limitBody(pm))))
 

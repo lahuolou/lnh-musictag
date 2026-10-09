@@ -3,6 +3,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -217,7 +218,8 @@ func effectiveSearchTerms(t *model.Track) (title, artist string) {
 // any mojibake it can detect. When a tag cannot be repaired (double-corrupted,
 // information lost) but the filename carries a clean "artist - title", the
 // artist/title tags fall back to the filename so the track stays readable.
-func fixEncodingHandler(s *store) http.HandlerFunc {
+// Runs as a background job for live progress.
+func fixEncodingHandler(js *jobStore, s *store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct{ IDs []string `json:"ids"` }
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -225,13 +227,15 @@ func fixEncodingHandler(s *store) http.HandlerFunc {
 			return
 		}
 		list := resolveTracks(s, req.IDs)
-		type res struct {
-			ID       string            `json:"id"`
-			FileName string            `json:"fileName"`
-			Changed  map[string]string `json:"changed"`
+		if len(list) == 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请至少勾选一首曲目"})
+			return
 		}
-		results := []res{}
-		for _, t := range list {
+		job := js.runProgressJob(len(list), func(j *scrapeJob, i int) scrapeResult {
+			t := list[i]
+			j.mu.Lock()
+			j.Current = t.FileName
+			j.mu.Unlock()
 			changed := map[string]string{}
 			m := map[string][]string{}
 			for _, k := range textFields {
@@ -264,8 +268,8 @@ func fixEncodingHandler(s *store) http.HandlerFunc {
 					refreshTrack(s, t.Path)
 				}
 			}
-			results = append(results, res{ID: t.ID, FileName: t.FileName, Changed: changed})
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"total": len(results), "results": results})
+			return scrapeResult{ID: t.ID, FileName: t.FileName, OK: len(changed) > 0, Message: fmt.Sprintf("修复 %d 个字段", len(changed))}
+		})
+		writeJSON(w, http.StatusOK, map[string]any{"jobId": job.ID, "total": job.Total})
 	}
 }

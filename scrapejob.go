@@ -163,6 +163,27 @@ func (js *jobStore) get(id string) *scrapeJob {
 	return js.jobs[id]
 }
 
+// runProgressJob 启动通用后台任务（格式转换 / 音频识别 / 乱码修复 / 简繁转换）：
+// 串行处理 total 项，每完成一项更新 Done/Current/Results，
+// 前端通过 GET /api/jobs/{id} 轮询可视化进度。
+func (js *jobStore) runProgressJob(total int, step func(j *scrapeJob, i int) scrapeResult) *scrapeJob {
+	job := js.create(total)
+	go func() {
+		for i := 0; i < total; i++ {
+			r := step(job, i)
+			job.mu.Lock()
+			job.Done++
+			job.Results = append(job.Results, r)
+			job.mu.Unlock()
+		}
+		job.mu.Lock()
+		job.Status = "done"
+		job.Current = ""
+		job.mu.Unlock()
+	}()
+	return job
+}
+
 // batchScrapeHandler starts a background job that scrapes the given track ids.
 func batchScrapeHandler(js *jobStore, store *store, ms *scrape.MultiSource) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

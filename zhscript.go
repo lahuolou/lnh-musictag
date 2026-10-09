@@ -3,6 +3,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -62,8 +63,8 @@ func detectTraditional(tags map[string]string) bool {
 }
 
 // convertScriptHandler converts the text fields of selected tracks between
-// simplified and traditional Chinese.
-func convertScriptHandler(s *store) http.HandlerFunc {
+// simplified and traditional Chinese. Runs as a background job for progress.
+func convertScriptHandler(js *jobStore, s *store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			IDs []string `json:"ids"`
@@ -75,13 +76,15 @@ func convertScriptHandler(s *store) http.HandlerFunc {
 		}
 		conv := scriptConverter(req.To)
 		list := resolveTracks(s, req.IDs)
-		type res struct {
-			ID       string `json:"id"`
-			FileName string `json:"fileName"`
-			Changed  int    `json:"changed"`
+		if len(list) == 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请至少勾选一首曲目"})
+			return
 		}
-		results := []res{}
-		for _, t := range list {
+		job := js.runProgressJob(len(list), func(j *scrapeJob, i int) scrapeResult {
+			t := list[i]
+			j.mu.Lock()
+			j.Current = t.FileName
+			j.mu.Unlock()
 			m := map[string][]string{}
 			changed := 0
 			for _, k := range textFields {
@@ -100,8 +103,8 @@ func convertScriptHandler(s *store) http.HandlerFunc {
 					refreshTrack(s, t.Path)
 				}
 			}
-			results = append(results, res{ID: t.ID, FileName: t.FileName, Changed: changed})
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"total": len(results), "results": results})
+			return scrapeResult{ID: t.ID, FileName: t.FileName, OK: changed > 0, Message: fmt.Sprintf("转换 %d 个字段", changed)}
+		})
+		writeJSON(w, http.StatusOK, map[string]any{"jobId": job.ID, "total": job.Total})
 	}
 }

@@ -58,6 +58,10 @@ onMounted(async () => {
       <span v-if="state.batchJob && state.batchJob.status !== 'done'" class="badge batch" :title="t('batchRunningTitle')" @click="tab('batch')">
         {{ t('batchProgress', { d: state.batchJob.done, t: state.batchJob.total }) }}
       </span>
+      <!-- 通用工具任务进度（识别/转换/乱码/简繁）：后台运行，任意页面可见 -->
+      <span v-if="state.toolJob && state.toolJob.status === 'running'" class="badge batch" :title="t('jobRunningTitle')" @click="tab('batch')">
+        {{ t('jobRunning', { d: state.toolJob.done, t: state.toolJob.total, c: '' }) }}
+      </span>
       <button class="ghost sm" :title="lang === 'zh' ? 'Switch to English' : '切换到中文'" @click="toggleLang">{{ lang === 'zh' ? 'EN' : '中' }}</button>
       <button class="navlink" :title="theme === 'dark' ? t('lightMode') : t('darkMode')" @click="toggleTheme">{{ theme === 'dark' ? '🌙' : '☀️' }}</button>
       <button class="ghost sm" :class="{ on: state.activeTab !== 'settings' }" @click="tab('list')">{{ t('list') }}</button>

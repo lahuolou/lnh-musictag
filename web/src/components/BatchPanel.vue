@@ -1,45 +1,51 @@
 <script setup>
 import { reactive, ref } from 'vue'
-import { state, toast, refresh, startBatchPoll } from '../store.js'
+import { state, toast, refresh, startBatchPoll, startToolJob, stopToolJob } from '../store.js'
 import { api } from '../api.js'
 import { t } from '../i18n.js'
 import FormatDialog from './FormatDialog.vue'
 
 const skipFilled = ref(true)
 const fmtOpen = ref(false)
-const idBusy = ref(false)
-const idResult = ref(null)
 
 // 简繁转换（默认繁体 → 简体，常见于整理港台唱片）
 const scriptTo = ref('simp')
 
 function needsSel() { if (state.selected.size === 0) { toast(t('selFirst'), 'err'); return false; } return true; }
 
-async function fixEnc() {
+// 通用后台任务：音频识别 / 乱码修复 / 简繁转换 / 格式转换共用。
+// 启动 job 后轮询进度，完成时 toast + 清勾选 + 静默刷新列表。
+const doneKeys = { identify: 'identifyDone', fixEnc: 'fixMojiDone', script: 'scriptDone', convert: 'fmtDone' }
+const failKeys = { identify: 'identifyFail', fixEnc: 'fixMojiFail', script: 'scriptFail', convert: 'fmtFail' }
+
+async function runToolJob(kind, url, body) {
   if (!needsSel()) return;
+  stopToolJob();
   try {
-    const r = await api('/api/fix-encoding', {
-      method: 'POST', body: JSON.stringify({ ids: [...state.selected] })
-    });
-    const n = (r.results || []).reduce((a, x) => a + Object.keys(x.changed || {}).length, 0);
-    toast(t('fixMojiDone', { n }), 'ok');
-    clearSel();
-    await refresh();
-  } catch (e) { toast(t('fixMojiFail', { m: e.message }), 'err'); }
+    const r = await api(url, { method: 'POST', body: JSON.stringify(body) });
+    if (!r.jobId) { // 无目标（如识别：库内无待识别曲目）
+      toast(t(doneKeys[kind], { ok: 0, t: 0 }), 'err');
+      return;
+    }
+    await startToolJob(r.jobId, r.total);
+    // 等待任务完成（startToolJob 立即返回，完成信号通过状态轮询到位）
+    const iv = setInterval(() => {
+      const tj = state.toolJob;
+      if (tj && tj.finished) {
+        clearInterval(iv);
+        toast(t(doneKeys[kind], { ok: tj.ok, t: tj.total }), tj.ok === tj.total ? 'ok' : 'err');
+        state.selected.clear();
+        refresh();
+        if (kind === 'convert') fmtOpen.value = false;
+      } else if (!tj) {
+        clearInterval(iv);
+      }
+    }, 500);
+  } catch (e) { toast(t(failKeys[kind], { m: e.message }), 'err'); }
 }
 
-async function convertScript() {
-  if (!needsSel()) return;
-  try {
-    const r = await api('/api/convert-script', {
-      method: 'POST', body: JSON.stringify({ ids: [...state.selected], to: scriptTo.value })
-    });
-    const n = (r.results || []).reduce((a, x) => a + x.changed, 0);
-    toast(t('scriptDone', { n }), 'ok');
-    clearSel();
-    await refresh();
-  } catch (e) { toast(t('scriptFail', { m: e.message }), 'err'); }
-}
+async function fixEnc() { await runToolJob('fixEnc', '/api/fix-encoding', { ids: [...state.selected] }); }
+async function convertScript() { await runToolJob('script', '/api/convert-script', { ids: [...state.selected], to: scriptTo.value }); }
 
 async function setChorus() {
   if (!needsSel()) return;
@@ -58,20 +64,7 @@ async function setChorus() {
 // 与库内已标注曲目匹配，命中后写入标签并抓取歌词
 async function identify() {
   if (state.selected.size === 0) { toast(t('identifySelFirst'), 'err'); return; }
-  idBusy.value = true;
-  idResult.value = null;
-  try {
-    const r = await api('/api/identify', {
-      method: 'POST', body: JSON.stringify({ ids: [...state.selected] })
-    });
-    const rs = r.results || [];
-    const matched = rs.filter(x => x.ok).length;
-    idResult.value = { matched, total: rs.length };
-    toast(t('identifyDone', { ok: matched, t: rs.length }), matched ? 'ok' : 'err');
-    clearSel();
-    await refresh();
-  } catch (e) { toast(t('identifyFail', { m: e.message }), 'err'); }
-  finally { idBusy.value = false; }
+  await runToolJob('identify', '/api/identify', { ids: [...state.selected] });
 }
 
 // 批量补全可选字段（默认全选；已有该标签时智能跳过）
@@ -152,13 +145,24 @@ async function startBatch() {
     </div>
   </div>
 
+  <div v-if="state.toolJob" style="margin-top:12px">
+    <div class="progbar"><div class="progfill" :style="{ width: (state.toolJob.total ? Math.round(state.toolJob.done / state.toolJob.total * 100) : 0) + '%' }"></div></div>
+    <div class="muted">
+      {{ state.toolJob.status === 'done'
+        ? t('jobDone', { ok: state.toolJob.ok, t: state.toolJob.total })
+        : t('jobRunning', { d: state.toolJob.done, t: state.toolJob.total, c: state.toolJob.current || t('processing') }) }}
+    </div>
+    <div v-if="state.toolJob.status === 'done' && state.toolJob.errors.length" class="err" style="white-space:pre-wrap">
+      <div v-for="(r, i) in state.toolJob.errors" :key="i">{{ r.fileName }}: {{ r.message }}</div>
+    </div>
+  </div>
+
   <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
     <div class="h3">{{ t('identify') }}</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:6px">
-      <button class="ghost sm" :disabled="idBusy" @click="identify">{{ idBusy ? t('identifying') : t('identifyRun', { n: state.selected.size }) }}</button>
+      <button class="ghost sm" :disabled="state.toolJob && state.toolJob.status === 'running'" @click="identify">{{ state.toolJob && state.toolJob.status === 'running' ? t('identifying') : t('identifyRun', { n: state.selected.size }) }}</button>
       <span class="muted">{{ t('identifyHint') }}</span>
     </div>
-    <div v-if="idResult" class="muted" style="margin-top:6px">{{ t('identified', { ok: idResult.matched, t: idResult.total }) }}</div>
   </div>
 
   <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">

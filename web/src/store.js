@@ -21,6 +21,7 @@ export const state = reactive({
   bFetchLyrics: false,
   batchBusy: false,
   batchJob: null,
+  toolJob: null, // 通用工具任务（音频识别/格式转换/乱码修复/简繁转换）进度
   toast: { msg: '', type: '', show: false, _tm: null }
 })
 
@@ -82,6 +83,38 @@ export async function startBatchPoll(jobId) {
 export function stopBatchPoll() {
   if (_batchTimer) { clearInterval(_batchTimer); _batchTimer = null; }
   state.batchBusy = false;
+}
+
+let _toolTimer = null;
+
+// 通用工具任务轮询：音频识别 / 格式转换 / 乱码修复 / 简繁转换。
+// 与批量补全共用“后台运行、进度全局可见”的模式，任务完成后置 finished，
+// 由发起组件负责 toast、清勾选与刷新。
+export async function startToolJob(jobId, total) {
+  stopToolJob();
+  state.toolJob = { id: jobId, total, done: 0, current: '', status: 'running', ok: 0, errors: [], finished: false };
+  const poll = async () => {
+    try {
+      const j = await api('/api/jobs/' + encodeURIComponent(jobId));
+      const tj = state.toolJob;
+      if (!tj) return;
+      tj.done = j.done;
+      tj.current = j.current || '';
+      if (j.status === 'done') {
+        stopToolJob();
+        tj.status = 'done';
+        tj.finished = true;
+        tj.ok = (j.results || []).filter(r => r.ok).length;
+        tj.errors = (j.results || []).filter(r => !r.ok && r.message);
+      }
+    } catch (e) { /* 瞬时网络抖动忽略，下一轮再试 */ }
+  };
+  await poll();
+  if (state.toolJob && !state.toolJob.finished) _toolTimer = setInterval(poll, 800);
+}
+
+export function stopToolJob() {
+  if (_toolTimer) { clearInterval(_toolTimer); _toolTimer = null; }
 }
 
 export async function loadSources() {

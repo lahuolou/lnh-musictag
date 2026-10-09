@@ -1,6 +1,6 @@
 <script setup>
 import { ref } from 'vue'
-import { state, toast, refresh } from '../store.js'
+import { state, toast, refresh, startToolJob, stopToolJob } from '../store.js'
 import { api } from '../api.js'
 import { t } from '../i18n.js'
 
@@ -49,13 +49,22 @@ async function run() {
         removeSource: false
       })
     });
-    const ok = (r.results || []).filter(x => x.ok).length;
-    toast(t('fmtDone', { ok, t: r.total }), ok === r.total ? 'ok' : 'err');
-    state.selected.clear();
-    await refresh();
-    emit('close');
-  } catch (e) { toast(t('fmtFail', { m: e.message }), 'err'); }
-  finally { busy.value = false; }
+    await startToolJob(r.jobId, r.total);
+    // 等待后台任务完成（进度在批量页全局可见）
+    const iv = setInterval(() => {
+      const tj = state.toolJob;
+      if (tj && tj.finished) {
+        clearInterval(iv);
+        toast(t('fmtDone', { ok: tj.ok, t: tj.total }), tj.ok === tj.total ? 'ok' : 'err');
+        state.selected.clear();
+        busy.value = false;
+        refresh();
+        emit('close');
+      } else if (!tj) {
+        clearInterval(iv);
+      }
+    }, 500);
+  } catch (e) { toast(t('fmtFail', { m: e.message }), 'err'); busy.value = false; }
 }
 </script>
 
