@@ -127,10 +127,10 @@ label{display:block;font-size:12px;color:var(--muted);margin:8px 0 4px}
 .gear-btn{display:inline-flex;align-items:center;justify-content:center;padding:6px 9px;touch-action:manipulation}
 .gear-menu{display:none;position:absolute;top:calc(100% + 6px);right:0;min-width:150px;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:6px;z-index:60}
 .gear.open .gear-menu,.gear:hover .gear-menu{display:block}
-.gear-menu a{display:block;padding:8px 12px;font-size:13px;color:var(--text);border-radius:7px;cursor:pointer;text-decoration:none;white-space:nowrap}
-.gear-menu a:hover{background:var(--panel2)}
-.gear-menu a.danger{color:#e34d59}
-.gear-menu a.danger:hover{background:color-mix(in srgb, #e34d59 12%, transparent)}
+.gear-menu a,.gear-menu button{display:block;width:100%;text-align:left;padding:8px 12px;font-size:13px;color:var(--text);background:none;border:none;border-radius:7px;cursor:pointer;white-space:nowrap}
+.gear-menu a:hover,.gear-menu button:hover{background:var(--panel2)}
+.gear-menu a.danger,.gear-menu button.danger{color:#e34d59}
+.gear-menu a.danger:hover,.gear-menu button.danger:hover{background:color-mix(in srgb, #e34d59 12%, transparent)}
 .navlink{background:none;border:none;color:var(--muted);font-size:14px;cursor:pointer;padding:4px 10px;border-radius:8px;white-space:nowrap}
 .navlink:hover{color:var(--text);background:var(--panel2)}
 .navlink.on{color:var(--text);background:var(--panel2);font-weight:600}

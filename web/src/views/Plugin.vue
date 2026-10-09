@@ -13,10 +13,10 @@ const ffStatus = ref({ available: false, path: '', version: '' })
 const ffInstalling = ref(false)
 
 const groupMeta = [
-  { kind: 'scrape', key: 'srcPlugins', hint: 'srcPluginsHint', icon: '🔌' },
-  { kind: 'tool', key: 'ffPlugins', hint: 'ffPluginsHint', icon: '🎛️' },
-  { kind: 'download', key: 'dlPlugins', hint: 'dlPluginsHint', icon: '⬇️' },
-  { kind: 'protocol', key: 'protoPlugins', hint: 'protoPluginsHint', icon: '🌐' },
+  { kind: 'scrape', key: 'srcPlugins', hint: 'srcPluginsHint' },
+  { kind: 'tool', key: 'ffPlugins', hint: 'ffPluginsHint' },
+  { kind: 'download', key: 'dlPlugins', hint: 'dlPluginsHint' },
+  { kind: 'protocol', key: 'protoPlugins', hint: 'protoPluginsHint' },
 ]
 
 // 需 Key 源 -> 设置页字段文案的 i18n 键（提示用户去「设置 → 数据库配置」填写）
@@ -40,7 +40,6 @@ async function loadPlugins() {
   try { plugins.value = (await api('/api/plugins') || {}).plugins || []; }
   catch (e) { msg.value = t('cfgLoadFail', { m: e.message }); }
 }
-
 async function loadFFmpeg() {
   try { ffStatus.value = await api('/api/ffmpeg/status'); }
   catch (e) { /* 静默 */ }
@@ -144,6 +143,10 @@ onMounted(() => { loadPlugins(); loadFFmpeg(); });
           </div>
         </div>
       </div>
+    </div>
+
+    <div class="panel" v-if="!msg && !plugins.length" style="padding:24px;text-align:center">
+      <p class="muted">{{ t('pluginsEmpty') }}</p>
     </div>
 
     <div class="panel" v-if="msg">
