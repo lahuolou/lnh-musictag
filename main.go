@@ -32,7 +32,7 @@ import (
 // AppVersion 当前版本号（与 GitHub Release tag 比较，用于“新版本提示”）。
 // 每次发布新版本时同步 bump（发布流程约束：推送前 bump 版本并打对应 Release tag，
 // 否则项目内“检查更新”会因 current==latest 而检测不到新版本）。
-const AppVersion = "1.4.4"
+const AppVersion = "1.4.5"
 
 //go:embed web/dist
 var webFS embed.FS
@@ -356,7 +356,7 @@ func main() {
 
 	// Static UI (Vue SPA built into web/dist; /api/... routes win over this)
 	dist, _ := fs.Sub(webFS, "web/dist")
-	mux.Handle("/", http.FileServer(http.FS(dist)))
+	mux.Handle("/", cacheControl(http.FileServer(http.FS(dist))))
 
 	// --- Scan (asynchronous, progressive) ---
 	pm.HandleFunc("POST /api/scan", func(w http.ResponseWriter, r *http.Request) {
