@@ -9,6 +9,7 @@ import EditPanel from './components/EditPanel.vue'
 import BatchPanel from './components/BatchPanel.vue'
 import DedupPanel from './components/DedupPanel.vue'
 import Settings from './views/Settings.vue'
+import Plugins from './views/Plugin.vue'
 import Toast from './components/Toast.vue'
 import UpdateModal from './components/UpdateModal.vue'
 import AboutModal from './components/AboutModal.vue'
@@ -59,7 +60,7 @@ onMounted(async () => {
       </span>
       <button class="ghost sm" :title="lang === 'zh' ? 'Switch to English' : '切换到中文'" @click="toggleLang">{{ lang === 'zh' ? 'EN' : '中' }}</button>
       <button class="navlink" :title="theme === 'dark' ? t('lightMode') : t('darkMode')" @click="toggleTheme">{{ theme === 'dark' ? '🌙' : '☀️' }}</button>
-      <button class="ghost sm" :class="{ on: state.activeTab !== 'settings' }" @click="tab('list')">{{ t('list') }}</button>
+      <button class="ghost sm" :class="{ on: state.activeTab !== 'settings' && state.activeTab !== 'plugins' }" @click="tab('list')">{{ t('list') }}</button>
       <!-- 齿轮二级导航：设置 / 关于 / 检查更新 / 退出（悬停或点击弹出） -->
       <div class="gear" :class="{ open: gearOpen }" @click="gearOpen = !gearOpen">
         <button class="ghost sm gear-btn" :title="t('menu')">
@@ -67,6 +68,7 @@ onMounted(async () => {
         </button>
         <div class="gear-menu" @click.stop>
           <a @click="tab('settings'); gearOpen = false">{{ t('settings') }}</a>
+          <a @click="tab('plugins'); gearOpen = false">{{ t('plugins') }}</a>
           <a @click="aboutOpen = true; gearOpen = false">{{ t('about') }}</a>
           <a @click="checkVersion(true); gearOpen = false">{{ t('checkUpdate') }}</a>
           <a class="danger" @click="logout">{{ t('logout') }}</a>
@@ -75,7 +77,7 @@ onMounted(async () => {
     </nav>
 
     <!-- 合并页：左 音乐列表，右 编辑/批量/去重 -->
-    <div v-if="state.activeTab !== 'settings'" class="page merge">
+    <div v-if="state.activeTab !== 'settings' && state.activeTab !== 'plugins'" class="page merge">
       <div class="split">
         <div class="left">
           <MusicTree />
@@ -91,6 +93,10 @@ onMounted(async () => {
           <DedupPanel v-else-if="state.activeTab === 'dedup'" />
         </div>
       </div>
+    </div>
+
+    <div v-else-if="state.activeTab === 'plugins'" class="page">
+      <Plugins />
     </div>
 
     <div v-else class="page">

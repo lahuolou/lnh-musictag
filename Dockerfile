@@ -26,15 +26,19 @@ RUN apk add --no-cache ca-certificates \
 FROM alpine:3.20
 # 默认仅装运行必需：ca-certificates（HTTPS 刮削源）+ chromaprint（fpcalc，
 # 供“音频内容识别”）。
-# FFmpeg 已从镜像移除：格式转换改为插件式——在「设置 → FFmpeg」里
-# ① 填写宿主机的 ffmpeg 绝对路径（将 /usr/bin 映射进容器即可），或
-# ② 点击“一键安装”（容器内 apk add --no-cache ffmpeg，需要 root 用户）。
-# 如希望镜像内置 ffmpeg，把下面这行取消注释后自行构建：
+# FFmpeg 已从镜像移除，改为可选，三种启用方式（任选其一）：
+#   ① compose 里设 LNH_INSTALL_FFMPEG=true，容器启动时自动安装（见 entrypoint.sh）；
+#   ② 在「插件 → FFmpeg」点“一键安装”（容器内 apk add，需 root 用户）；
+#   ③ 把宿主机 /usr/bin 挂载进容器，并在插件页填写宿主机 ffmpeg 绝对路径。
+# 如希望构建时内置 ffmpeg，把下面这行取消注释后自行构建：
 # RUN apk add --no-cache ffmpeg
 RUN apk add --no-cache ca-certificates chromaprint
 COPY --from=build /out/lnh-musictag /lnh-musictag
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 EXPOSE 10248
 # 音乐目录挂载点（宿主目录映射到此，需读写，应用会把标签/封面/歌词写回文件）
 VOLUME ["/music"]
-ENTRYPOINT ["/lnh-musictag"]
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["/lnh-musictag"]

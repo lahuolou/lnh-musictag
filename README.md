@@ -49,6 +49,7 @@ services:
       - LNH_ADMIN_USER=admin        # optional; random password generated on first run if omitted
       - LNH_ADMIN_PASS=yourpassword # optional
       # - ACOUSTID_API_KEY=your_key # optional, for AcoustID fingerprint lookup
+      - LNH_INSTALL_FFMPEG=false    # true to auto-install ffmpeg in the container on startup (format conversion)
     volumes:
       - /mnt/sata3-1/mp3:/music     # <- your music directory
       - ./config:/config            # SQLite DB + settings persist here
@@ -176,6 +177,7 @@ services:
       - LNH_ADMIN_USER=admin        # 可选；不填则首次启动自动生成随机密码
       - LNH_ADMIN_PASS=你的密码       # 可选
       # - ACOUSTID_API_KEY=你的Key   # 可选，用于 AcoustID 听声识曲
+      - LNH_INSTALL_FFMPEG=false    # true 则容器启动时自动安装 ffmpeg（格式转换用）
     volumes:
       - /mnt/sata3-1/mp3:/music     # <- 改成你的真实音乐目录
       - ./config:/config            # SQLite 数据库与配置持久化

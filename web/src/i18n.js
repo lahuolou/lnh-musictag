@@ -28,6 +28,7 @@ const dict = {
     dedup: '去重',
     edit: '编辑',
     settings: '设置',
+    plugins: '插件',
     logout: '退出',
     darkMode: '切换到黑夜模式',
     lightMode: '切换到白天模式',
@@ -255,6 +256,8 @@ const dict = {
     // FFmpeg 插件
     ffPlugins: '🎛️ FFmpeg 插件',
     ffHint: 'FFmpeg 已从镜像移除，改为可选：可填写宿主机 FFmpeg 的绝对路径（容器内可访问），或点击下方按钮在容器内安装。',
+    ffPluginsHint: '工具类插件：目前包含 FFmpeg（格式转换）。可自定义路径，或一键在容器内安装。',
+    builtin: '内置',
     ffReady: '已就绪',
     ffMissing: '未检测到 FFmpeg',
     ffPath: 'FFmpeg 绝对路径',
@@ -300,6 +303,7 @@ const dict = {
     dedup: 'Duplicates',
     edit: 'Edit',
     settings: 'Settings',
+    plugins: 'Plugins',
     logout: 'Logout',
     darkMode: 'Switch to dark mode',
     lightMode: 'Switch to light mode',
@@ -518,6 +522,8 @@ const dict = {
     // FFmpeg plugin
     ffPlugins: '🎛️ FFmpeg Plugin',
     ffHint: 'FFmpeg is no longer bundled: set an absolute path reachable inside the container, or install it with the button below.',
+    ffPluginsHint: 'Tool plugins: currently FFmpeg (format conversion). Set a custom path or install it inside the container in one click.',
+    builtin: 'Built-in',
     ffReady: 'Ready',
     ffMissing: 'FFmpeg not found',
     ffPath: 'FFmpeg absolute path',
