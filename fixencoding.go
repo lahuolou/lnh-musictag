@@ -153,6 +153,31 @@ func looksGarbled(s string) bool {
 	return false
 }
 
+// looksGarbledTags reports whether any of a track's visible text fields
+// (filename + title/artist/album/albumartist tags) is mojibake. It combines
+// the cheap marker check with "could be repaired by fixMojibake", so GBK/UTF-8
+// misread CJK sequences that are still valid Han characters are also caught.
+// Used at scan time to set Track.Garbled (the "乱码" filter then works server-side).
+func looksGarbledTags(t *model.Track) bool {
+	fields := []string{
+		t.FileName,
+		t.Tags["TITLE"], t.Tags["ARTIST"],
+		t.Tags["ALBUM"], t.Tags["ALBUMARTIST"],
+	}
+	for _, s := range fields {
+		if s == "" {
+			continue
+		}
+		if looksGarbled(s) {
+			return true
+		}
+		if fixMojibake(s) != s {
+			return true
+		}
+	}
+	return false
+}
+
 // parseFileNameArtistTitle splits "艺术家 - 标题.ext" from a filename, falling
 // back to (base, "") when no separator is present. Used to recover readable
 // artist/title from an unrecoverable garbled tag.

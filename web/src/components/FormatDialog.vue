@@ -114,7 +114,7 @@ async function run() {
         <div class="modal-foot">
           <span class="muted" style="font-size:12px">{{ t('willConvert', { n: state.selected.size }) }}</span>
           <button class="ghost" @click="emit('close')">{{ t('cancel') }}</button>
-          <button :disabled="busy" @click="run">{{ busy ? t('converting') : t('confirm') }}</button>
+          <button :disabled="busy || state.selected.size === 0" @click="run">{{ busy ? t('converting') : state.selected.size === 0 ? t('selBtn') : t('confirm') }}</button>
         </div>
       </div>
     </div>

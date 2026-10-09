@@ -5,6 +5,7 @@
 package main
 
 import (
+	"database/sql"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -41,24 +42,29 @@ type store struct {
 	byPath map[string]string // path -> id
 	order  map[string]int64  // id -> 扫描（插入）序号，保证 /api/tracks 按扫描顺序稳定返回
 	seq    int64
+	db     *sql.DB // 曲目持久化（可能为 nil：配置库不可用时退化为纯内存）
 }
 
-func newStore() *store {
-	return &store{tracks: map[string]*model.Track{}, byPath: map[string]string{}, order: map[string]int64{}}
+func newStore(db *sql.DB) *store {
+	return &store{tracks: map[string]*model.Track{}, byPath: map[string]string{}, order: map[string]int64{}, db: db}
 }
 
 func (s *store) add(t *model.Track) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if _, exists := s.byPath[t.Path]; exists {
+		s.mu.Unlock()
 		return
 	}
 	t.HasTrad = detectTraditional(t.Tags)
+	t.Garbled = looksGarbledTags(t)
 	t.NeedsIdentify = needsIdentify(t)
 	s.tracks[t.ID] = t
 	s.byPath[t.Path] = t.ID
 	s.seq++
 	s.order[t.ID] = s.seq
+	db := s.db
+	s.mu.Unlock()
+	upsertTrackDB(db, s, t)
 }
 
 func (s *store) all() []*model.Track {
@@ -119,6 +125,11 @@ func (s *store) ensureHashes(tracks []*model.Track) {
 					s.mu.Lock()
 					if cur := s.tracks[t.ID]; cur != nil && cur.SHA256 == "" {
 						cur.SHA256 = h
+						curPtr := cur
+						db := s.db
+						s.mu.Unlock()
+						upsertTrackDB(db, s, curPtr)
+						continue
 					}
 					s.mu.Unlock()
 				}
@@ -141,20 +152,26 @@ func (s *store) exists(path string) bool {
 
 func (s *store) remove(id string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if t, ok := s.tracks[id]; ok {
 		delete(s.tracks, id)
 		delete(s.byPath, t.Path)
+		s.mu.Unlock()
+		deleteTrackDB(s.db, s, id, t.Path)
+		return
 	}
+	s.mu.Unlock()
 }
 
 func (s *store) removeByPath(p string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if id, ok := s.byPath[p]; ok {
 		delete(s.tracks, id)
 		delete(s.byPath, p)
+		s.mu.Unlock()
+		deleteTrackDB(s.db, s, id, p)
+		return
 	}
+	s.mu.Unlock()
 }
 
 // scanState holds live progress of an asynchronous directory scan.
@@ -242,8 +259,6 @@ func (sm *scanManager) pause(p bool) {
 }
 
 func main() {
-	store := newStore()
-	ms := scrape.NewMultiSource()
 	configDir := getenvDefault("LNH_CONFIG_DIR", "/config")
 
 	// Database-backed config: admin + API keys live here, not in env vars.
@@ -252,6 +267,15 @@ func main() {
 		log.Fatalf("open config db: %v", err)
 	}
 	defer cfg.Close()
+
+	store := newStore(cfg.DB())
+	// 曲目持久化：启动时从数据库恢复上次扫描结果，升级/重启不丢列表
+	if err := ensureTracksTable(cfg.DB()); err != nil {
+		log.Printf("ensure tracks table: %v", err)
+	} else {
+		loadTracksFromDB(store, cfg.DB())
+	}
+	ms := scrape.NewMultiSource()
 
 	if k, ok := cfg.Get("acoustid_key"); ok && k != "" {
 		ms.Client().AcoustIDAPIKey = k
@@ -959,7 +983,8 @@ func (s *store) allTracksCount() int {
 
 // refreshTrack re-reads a track's tags/properties after a write.
 // Uses the light read (no full-file hash): SHA256 is computed lazily on the
-// dedup page and cached back into the store.
+// dedup page and cached back into the store. The refreshed record is also
+// persisted so the list survives restarts/upgrades.
 func refreshTrack(s *store, path string) {
 	t, err := taglibx.ReadTrackLight(path)
 	if err != nil {
@@ -970,6 +995,8 @@ func refreshTrack(s *store, path string) {
 		t.SHA256 = old.SHA256
 	}
 	t.HasTrad = detectTraditional(t.Tags)
+	t.Garbled = looksGarbledTags(t)
+	t.NeedsIdentify = needsIdentify(t)
 	s.mu.Lock()
 	s.tracks[t.ID] = t
 	s.byPath[path] = t.ID
@@ -977,7 +1004,9 @@ func refreshTrack(s *store, path string) {
 		s.seq++
 		s.order[t.ID] = s.seq
 	}
+	db := s.db
 	s.mu.Unlock()
+	upsertTrackDB(db, s, t)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

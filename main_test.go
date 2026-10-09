@@ -9,7 +9,7 @@ import (
 // TestStoreScanOrder 验证 /api/tracks 按扫描（插入）顺序稳定返回：
 // 先扫描到的排前面，后扫描的递增在后面，不因 map 遍历随机而乱序。
 func TestStoreScanOrder(t *testing.T) {
-	s := newStore()
+	s := newStore(nil)
 	paths := []string{"/m/c.flac", "/m/a.mp3", "/m/b.wav"}
 	for i, p := range paths {
 		s.add(&model.Track{ID: string(rune('a' + i)), Path: p, FileName: p})

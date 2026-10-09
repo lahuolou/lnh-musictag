@@ -134,7 +134,7 @@ async function startBatch() {
     <select v-model="state.bSource" style="padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text)">
       <option v-for="s in state.sources" :key="s.name" :value="s.name">{{ s.label }}</option>
     </select>
-    <button :disabled="state.batchBusy" @click="startBatch">{{ t('batchRun', { n: state.selected.size }) }}</button>
+    <button :disabled="state.batchBusy || state.selected.size === 0" @click="startBatch">{{ state.selected.size === 0 ? t('selBtn') : t('batchRun', { n: state.selected.size }) }}</button>
   </div>
 
   <div v-if="state.batchJob" style="margin-top:12px">
@@ -164,7 +164,7 @@ async function startBatch() {
   <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
     <div class="h3">{{ t('identify') }}</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:6px">
-      <button class="ghost sm" :disabled="state.toolJob && state.toolJob.status === 'running'" @click="identify">{{ state.toolJob && state.toolJob.status === 'running' ? t('identifying') : t('identifyRun', { n: state.selected.size }) }}</button>
+      <button class="ghost sm" :disabled="(state.toolJob && state.toolJob.status === 'running') || state.selected.size === 0" @click="identify">{{ state.toolJob && state.toolJob.status === 'running' ? t('identifying') : state.selected.size === 0 ? t('selBtn') : t('identifyRun', { n: state.selected.size }) }}</button>
       <span class="muted">{{ t('identifyHint') }}</span>
     </div>
   </div>
@@ -181,7 +181,7 @@ async function startBatch() {
   <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
     <div class="h3">{{ t('fixMoji') }}</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:6px">
-      <button class="ghost sm" @click="fixEnc">{{ t('fixMojiRun', { n: state.selected.size }) }}</button>
+      <button class="ghost sm" :disabled="state.selected.size === 0" @click="fixEnc">{{ state.selected.size === 0 ? t('selBtn') : t('fixMojiRun', { n: state.selected.size }) }}</button>
       <span class="muted">{{ t('fixMojiHint') }}</span>
     </div>
   </div>
@@ -201,7 +201,7 @@ async function startBatch() {
         <option value="trad">{{ t('scriptToTrad') }}</option>
         <option value="simp">{{ t('scriptToSimp') }}</option>
       </select>
-      <button class="ghost sm" @click="convertScript">{{ t('scriptRun', { n: state.selected.size }) }}</button>
+      <button class="ghost sm" :disabled="state.selected.size === 0" @click="convertScript">{{ state.selected.size === 0 ? t('selBtn') : t('scriptRun', { n: state.selected.size }) }}</button>
     </div>
   </div>
 </template>

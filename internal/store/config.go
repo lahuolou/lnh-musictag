@@ -43,6 +43,11 @@ func OpenConfig(dir string) (*Config, error) {
 	return c, nil
 }
 
+// DB exposes the underlying SQLite handle so the in-memory track store can
+// persist scan results into the same database file (single connection, no
+// cross-process locking issues).
+func (c *Config) DB() *sql.DB { return c.db }
+
 // Close releases the underlying database.
 func (c *Config) Close() error { return c.db.Close() }
 

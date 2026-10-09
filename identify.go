@@ -19,10 +19,15 @@ import (
 
 // filenameNoInfo reports whether a filename carries no usable title info:
 // empty, placeholder ("Unknown"), garbled, or a bare track number (01, track01).
+// A placeholder artist (Unknown/未知) also counts as "no info": the file
+// has no real artist attribution and should go through audio identification.
 func filenameNoInfo(fn string) bool {
-	_, title := parseFileNameArtistTitle(fn)
+	artist, title := parseFileNameArtistTitle(fn)
 	t := strings.TrimSpace(title)
 	if t == "" || looksUnknown(t) || looksGarbled(t) {
+		return true
+	}
+	if looksUnknown(artist) {
 		return true
 	}
 	low := strings.ToLower(t)

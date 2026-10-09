@@ -1,6 +1,6 @@
 <script setup>
 import { onMounted, ref } from 'vue'
-import { state, logout, resumeJobs, verState, checkVersion, dismissVersion } from './store.js'
+import { state, logout, resumeJobs, verState, checkVersion } from './store.js'
 import { api } from './api.js'
 import { t, lang, setLang } from './i18n.js'
 import Login from './views/Login.vue'
@@ -62,7 +62,9 @@ onMounted(async () => {
       <button class="ghost sm" :class="{ on: state.activeTab !== 'settings' }" @click="tab('list')">{{ t('list') }}</button>
       <!-- 齿轮二级导航：设置 / 关于 / 检查更新 / 退出（悬停或点击弹出） -->
       <div class="gear" :class="{ open: gearOpen }" @click="gearOpen = !gearOpen">
-        <button class="ghost sm" :title="t('menu')">⚙</button>
+        <button class="ghost sm gear-btn" :title="t('menu')">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
         <div class="gear-menu" @click.stop>
           <a @click="tab('settings'); gearOpen = false">{{ t('settings') }}</a>
           <a @click="aboutOpen = true; gearOpen = false">{{ t('about') }}</a>
@@ -95,7 +97,7 @@ onMounted(async () => {
       <Settings />
     </div>
   </template>
-  <UpdateModal :open="verState.showUpdate" :data="verState.ver" @close="verState.showUpdate = false" @later="dismissVersion" @view="dismissVersion" />
+  <UpdateModal :open="verState.showUpdate" :data="verState.ver" @close="verState.showUpdate = false" @later="verState.showUpdate = false" @view="verState.showUpdate = false" />
   <AboutModal :open="aboutOpen" @close="aboutOpen = false" />
   <Toast />
 </template>

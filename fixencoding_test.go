@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/text/encoding/simplifiedchinese"
 
@@ -156,36 +157,50 @@ func TestFixEncodingHandlerFilenameFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("读取测试文件失败: %v", err)
 	}
-	s := newStore()
+	s := newStore(nil)
 	s.add(tr)
 
+	js := newJobStore()
 	body, _ := json.Marshal(map[string]any{"ids": []string{tr.ID}})
 	req := httptest.NewRequest(http.MethodPost, "/api/fix-encoding", strings.NewReader(string(body)))
 	w := httptest.NewRecorder()
-	fixEncodingHandler(s)(w, req)
+	fixEncodingHandler(js, s)(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("handler 状态码 %d", w.Code)
 	}
-	var resp struct {
-		Results []struct {
-			ID      string            `json:"id"`
-			Changed map[string]string `json:"changed"`
-		} `json:"results"`
+	// job 模式：POST 返回 jobId，结果异步在 job 上
+	var jr struct {
+		JobID string `json:"jobId"`
 	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("解析响应失败: %v", err)
+	if err := json.Unmarshal(w.Body.Bytes(), &jr); err != nil || jr.JobID == "" {
+		t.Fatalf("未返回 jobId: %v body=%s", err, w.Body.String())
 	}
-	if len(resp.Results) != 1 {
-		t.Fatalf("结果数 %d, want 1", len(resp.Results))
+	job := js.get(jr.JobID)
+	if job == nil {
+		t.Fatal("job 不存在")
 	}
-	ch := resp.Results[0].Changed
-	if ch[taglibx.Title] != "蓝色蝴蝶" {
-		t.Fatalf("标题未回退文件名: %v", ch)
+	// job 异步执行：轮询等待完成
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		job.mu.Lock()
+		done := job.Status == "done"
+		n := len(job.Results)
+		job.mu.Unlock()
+		if done {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("job 超时未完成，结果数 %d", n)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
-	if ch[taglibx.Artist] != "Unknown" {
-		t.Fatalf("艺术家未回退文件名: %v", ch)
+	if len(job.Results) != 1 {
+		t.Fatalf("结果数 %d, want 1", len(job.Results))
 	}
-	// 写回后文件标签应已可读
+	if !job.Results[0].OK {
+		t.Fatalf("乱码修复未成功: %+v", job.Results[0])
+	}
+	// 写回后文件标签应已可读（下面断言标题/艺术家已还原）
 	tr2, err := taglibx.ReadTrack(mp3)
 	if err != nil {
 		t.Fatalf("修复后重读失败: %v", err)

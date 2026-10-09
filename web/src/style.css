@@ -124,6 +124,7 @@ label{display:block;font-size:12px;color:var(--muted);margin:8px 0 4px}
 .topnav .spacer{flex:1}
 /* 齿轮二级导航：悬停或点击弹出（设置/关于/检查更新/退出） */
 .gear{position:relative;display:inline-flex}
+.gear-btn{display:inline-flex;align-items:center;justify-content:center;padding:6px 9px;touch-action:manipulation}
 .gear-menu{display:none;position:absolute;top:calc(100% + 6px);right:0;min-width:150px;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:6px;z-index:60}
 .gear.open .gear-menu,.gear:hover .gear-menu{display:block}
 .gear-menu a{display:block;padding:8px 12px;font-size:13px;color:var(--text);border-radius:7px;cursor:pointer;text-decoration:none;white-space:nowrap}
@@ -169,6 +170,9 @@ label{display:block;font-size:12px;color:var(--muted);margin:8px 0 4px}
   .mtbl td:nth-child(4){max-width:90px}
   .login-box{width:88vw;padding:26px 20px}
   .fmt-grid{grid-template-columns:1fr}
+  /* 手机触控友好：按钮/下拉最小高度，避免点击困难 */
+  .ghost.sm, .chip, select, .mtbl .tchk{min-height:40px;touch-action:manipulation}
+  .ghost.sm{padding:6px 14px}
 }
 .filters{display:flex;gap:6px;flex-wrap:wrap}
 .chip{background:var(--panel2);border:1px solid var(--line);color:var(--muted);padding:3px 12px;border-radius:14px;font-size:12px;cursor:pointer;white-space:nowrap}

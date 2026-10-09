@@ -30,8 +30,8 @@ export function go(p) { location.hash = p }
 
 export function cur() { return state.tracks.find(t => t.id === state.currentId) || null }
 
-// 新版本：登录成功/手动检查时调用。
-// latest 与 current 不同 → 弹出更新提醒（同版本已“不再提醒”则不弹；force=true 手动检查时无视）。
+// 新版本：登录成功/页面加载时调用（仅刷新顶栏徽标，不弹窗）；
+// 手动“检查更新”（force=true）才弹出更新提醒弹窗。
 export const verState = { ver: null, showUpdate: false }
 
 export async function checkVersion(force = false) {
@@ -40,18 +40,12 @@ export async function checkVersion(force = false) {
     state.version = v.current || '';
     if (v.latest && v.latest !== v.current) {
       verState.ver = v;
-      if (force) { verState.showUpdate = true; return; }
-      if (localStorage.getItem('lnh-ver-dismiss') !== v.latest) verState.showUpdate = true;
+      if (force) verState.showUpdate = true;
     } else {
       verState.ver = null;
       if (force) toast(t('upToDate'));
     }
   } catch (e) { /* 无网络/后端不支持时静默 */ }
-}
-
-export function dismissVersion() {
-  if (verState.ver) localStorage.setItem('lnh-ver-dismiss', verState.ver.latest);
-  verState.showUpdate = false;
 }
 
 export function toast(msg, type = '') {

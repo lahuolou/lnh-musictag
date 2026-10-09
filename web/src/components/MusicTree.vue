@@ -23,6 +23,9 @@ function norm(s) {
 }
 
 function isGarbled(t) {
+  // 扫描时后端已判定（GBK/UTF-8 错乱 + 可修复性），优先用标志位；
+  // 旧数据无标志位时回退到本地启发式
+  if (typeof t.garbled === 'boolean') return t.garbled;
   const s = [t.fileName, t.tags.TITLE || '', t.tags.ARTIST || '', t.tags.ALBUM || ''].join(' ');
   return /[\uFFFD]/.test(s) || /[ÃÂ][\u0080-\u00BF]/.test(s) || /â€[™“”Œ]/.test(s) || /[åæçèéêëìíîï][\u0080-\u00BF]{2}/.test(s);
 }
