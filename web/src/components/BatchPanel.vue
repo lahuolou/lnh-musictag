@@ -40,7 +40,12 @@ async function runToolJob(kind, url, body) {
         clearInterval(iv);
       }
     }, 500);
-  } catch (e) { toast(t(failKeys[kind], { m: e.message }), 'err'); }
+  } catch (e) {
+    // 启动失败：清除可能残留的旧任务展示，避免“点了 A 却看到 B 的进度”
+    stopToolJob();
+    state.toolJob = null;
+    toast(t(failKeys[kind], { m: e.message }), 'err');
+  }
 }
 
 async function fixEnc() { await runToolJob('fixEnc', '/api/fix-encoding', { ids: [...state.selected] }); }
@@ -148,7 +153,7 @@ async function startBatch() {
     <div class="progbar"><div class="progfill" :style="{ width: (state.toolJob.total ? Math.round(state.toolJob.done / state.toolJob.total * 100) : 0) + '%' }"></div></div>
     <div class="muted">
       {{ state.toolJob.status === 'done'
-        ? t('jobDone', { ok: state.toolJob.ok, t: state.toolJob.total })
+        ? t('jobDone', { ok: state.toolJob.ok, fail: state.toolJob.fail, skip: state.toolJob.skip, t: state.toolJob.total })
         : t('jobRunning', { d: state.toolJob.done, t: state.toolJob.total, c: state.toolJob.current || t('processing') }) }}
     </div>
     <div v-if="state.toolJob.status === 'done' && state.toolJob.errors.length" class="err" style="white-space:pre-wrap">

@@ -156,7 +156,13 @@ func identifyHandler(js *jobStore, s *store, ms *scrape.MultiSource) http.Handle
 				return scrapeResult{ID: t.ID, FileName: t.FileName, OK: false, Message: "指纹计算失败: " + err.Error()}
 			}
 			res := matchAndWrite(s, ms, t, f, identifyBase)
-			return scrapeResult{ID: t.ID, FileName: t.FileName, OK: res.OK, Message: res.Message}
+			if res.OK {
+				return scrapeResult{ID: t.ID, FileName: t.FileName, OK: true, Message: res.Message}
+			}
+			// 未匹配/匹配来源无标题：属“未识别”，中性跳过，不算失败、不标红；
+			// 仅写标签失败等真错误计入失败。
+			skip := strings.Contains(res.Message, "未匹配") || strings.Contains(res.Message, "无标题")
+			return scrapeResult{ID: t.ID, FileName: t.FileName, OK: false, Skip: skip, Message: res.Message}
 		})
 		writeJSON(w, http.StatusOK, map[string]any{"jobId": job.ID, "total": job.Total})
 	}

@@ -99,11 +99,14 @@ func convertScriptHandler(js *jobStore, s *store) http.HandlerFunc {
 				}
 			}
 			if len(m) > 0 {
-				if taglibx.WriteTags(t.Path, m, false) == nil {
-					refreshTrack(s, t.Path)
+				if err := taglibx.WriteTags(t.Path, m, false); err != nil {
+					return scrapeResult{ID: t.ID, FileName: t.FileName, OK: false, Message: "写标签失败: " + err.Error()}
 				}
+				refreshTrack(s, t.Path)
+				return scrapeResult{ID: t.ID, FileName: t.FileName, OK: true, Message: fmt.Sprintf("转换 %d 个字段", changed)}
 			}
-			return scrapeResult{ID: t.ID, FileName: t.FileName, OK: changed > 0, Message: fmt.Sprintf("转换 %d 个字段", changed)}
+			// 无需要转换的字段：中性跳过，不算失败、不标红
+			return scrapeResult{ID: t.ID, FileName: t.FileName, Skip: true, Message: "无变化，已跳过"}
 		})
 		writeJSON(w, http.StatusOK, map[string]any{"jobId": job.ID, "total": job.Total})
 	}
