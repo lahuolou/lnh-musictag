@@ -1,6 +1,6 @@
 <script setup>
 import { onMounted, ref } from 'vue'
-import { state, logout, resumeJobs } from './store.js'
+import { state, logout, resumeJobs, verState, checkVersion, dismissVersion } from './store.js'
 import { api } from './api.js'
 import { t, lang, setLang } from './i18n.js'
 import Login from './views/Login.vue'
@@ -10,6 +10,8 @@ import BatchPanel from './components/BatchPanel.vue'
 import DedupPanel from './components/DedupPanel.vue'
 import Settings from './views/Settings.vue'
 import Toast from './components/Toast.vue'
+import UpdateModal from './components/UpdateModal.vue'
+import AboutModal from './components/AboutModal.vue'
 
 const theme = ref(localStorage.getItem('lnh-theme') || (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'))
 function applyTheme() {
@@ -21,14 +23,8 @@ function toggleTheme() { theme.value = theme.value === 'dark' ? 'light' : 'dark'
 function tab(name) { state.activeTab = name; }
 function toggleLang() { setLang(lang.value === 'zh' ? 'en' : 'zh'); }
 
-// 新版本提示：/api/version 返回 current/latest/url，latest 与 current 不同则展示
-const ver = ref(null)
-async function loadVersion() {
-  try {
-    const v = await api('/api/version');
-    if (v.latest && v.latest !== v.current) ver.value = v;
-  } catch (e) { /* 无网络/后端不支持时静默 */ }
-}
+const aboutOpen = ref(false)
+const gearOpen = ref(false)
 
 onMounted(async () => {
   applyTheme();
@@ -39,7 +35,7 @@ onMounted(async () => {
   } catch (e) {
     state.authed = false;
   }
-  loadVersion();
+  checkVersion(); // 已登录（如刷新恢复会话）时检查更新；未登录时静默失败，登录成功后由 Login.vue 再查
   if (state.authed) resumeJobs(); // 刷新/换设备后恢复进行中的批量任务进度
 });
 </script>
@@ -51,10 +47,8 @@ onMounted(async () => {
       <span class="brand">{{ t('brand') }}</span>
       <span class="spacer"></span>
       <span class="badge">{{ t('tracks', { n: state.tracks.length }) }}</span>
-      <!-- 新版本提示：点击跳 GitHub Releases -->
-      <a v-if="ver" class="badge newver" :href="ver.url" target="_blank" rel="noopener" :title="t('newVerTitle')">
-        ⬆ {{ t('newVer') }} v{{ ver.latest }}
-      </a>
+      <!-- 新版本徽标：点击打开更新弹窗 -->
+      <a v-if="verState.ver" class="badge newver" :title="t('newVerTitle')" @click="verState.showUpdate = true">{{ t('newVer') }} v{{ verState.ver.latest }}</a>
       <!-- 全局批量进度：后台任务进行中，任意页面可见，点击回到批量页 -->
       <span v-if="state.batchJob && state.batchJob.status !== 'done'" class="badge batch" :title="t('batchRunningTitle')" @click="tab('batch')">
         {{ t('batchProgress', { d: state.batchJob.done, t: state.batchJob.total }) }}
@@ -66,8 +60,16 @@ onMounted(async () => {
       <button class="ghost sm" :title="lang === 'zh' ? 'Switch to English' : '切换到中文'" @click="toggleLang">{{ lang === 'zh' ? 'EN' : '中' }}</button>
       <button class="navlink" :title="theme === 'dark' ? t('lightMode') : t('darkMode')" @click="toggleTheme">{{ theme === 'dark' ? '🌙' : '☀️' }}</button>
       <button class="ghost sm" :class="{ on: state.activeTab !== 'settings' }" @click="tab('list')">{{ t('list') }}</button>
-      <button class="ghost sm" :class="{ on: state.activeTab === 'settings' }" @click="tab('settings')">{{ t('settings') }}</button>
-      <button class="ghost sm" @click="logout">{{ t('logout') }}</button>
+      <!-- 齿轮二级导航：设置 / 关于 / 检查更新 / 退出（悬停或点击弹出） -->
+      <div class="gear" :class="{ open: gearOpen }" @click="gearOpen = !gearOpen">
+        <button class="ghost sm" :title="t('menu')">⚙</button>
+        <div class="gear-menu" @click.stop>
+          <a @click="tab('settings'); gearOpen = false">{{ t('settings') }}</a>
+          <a @click="aboutOpen = true; gearOpen = false">{{ t('about') }}</a>
+          <a @click="checkVersion(true); gearOpen = false">{{ t('checkUpdate') }}</a>
+          <a class="danger" @click="logout">{{ t('logout') }}</a>
+        </div>
+      </div>
     </nav>
 
     <!-- 合并页：左 音乐列表，右 编辑/批量/去重 -->
@@ -93,5 +95,7 @@ onMounted(async () => {
       <Settings />
     </div>
   </template>
+  <UpdateModal :open="verState.showUpdate" :data="verState.ver" @close="verState.showUpdate = false" @later="dismissVersion" @view="dismissVersion" />
+  <AboutModal :open="aboutOpen" @close="aboutOpen = false" />
   <Toast />
 </template>
