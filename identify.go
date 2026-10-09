@@ -146,7 +146,7 @@ func identifyHandler(js *jobStore, s *store, ms *scrape.MultiSource) http.Handle
 
 		buildIdentifyBase(s, fp)
 
-		job := js.runProgressJob(len(targets), func(j *scrapeJob, i int) scrapeResult {
+		job := js.runProgressJob("identify", len(targets), func(j *scrapeJob, i int) scrapeResult {
 			t := targets[i]
 			j.mu.Lock()
 			j.Current = t.FileName

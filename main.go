@@ -293,6 +293,7 @@ func main() {
 	pm.HandleFunc("POST /api/scrape/batch", batchScrapeHandler(jobs, store, ms))
 	pm.HandleFunc("GET /api/scrape/jobs/{id}", jobProgressHandler(jobs))
 	pm.HandleFunc("GET /api/jobs/{id}", jobProgressHandler(jobs)) // 通用后台任务进度（转换/识别/乱码/简繁）
+	pm.HandleFunc("GET /api/jobs", activeJobsHandler(jobs))        // 进行中的任务列表（刷新/换设备后恢复进度）
 	pm.HandleFunc("GET /api/scrape/sources", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, ms.Sources())
 	})
@@ -318,6 +319,7 @@ func main() {
 		if dir == "" {
 			dir = cfg.GetDefault("scan_dir", "/music")
 		}
+		dir = filepath.Clean(dir) // 折叠 ../，防止路径遍历混淆；仍须为真实存在的目录
 		if st, err := os.Stat(dir); err != nil || !st.IsDir() {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "目录不可访问: " + dir})
 			return

@@ -231,7 +231,7 @@ func fixEncodingHandler(js *jobStore, s *store) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请至少勾选一首曲目"})
 			return
 		}
-		job := js.runProgressJob(len(list), func(j *scrapeJob, i int) scrapeResult {
+		job := js.runProgressJob("fixEnc", len(list), func(j *scrapeJob, i int) scrapeResult {
 			t := list[i]
 			j.mu.Lock()
 			j.Current = t.FileName

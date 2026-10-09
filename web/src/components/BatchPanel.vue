@@ -14,8 +14,7 @@ const scriptTo = ref('simp')
 function needsSel() { if (state.selected.size === 0) { toast(t('selFirst'), 'err'); return false; } return true; }
 
 // 通用后台任务：音频识别 / 乱码修复 / 简繁转换 / 格式转换共用。
-// 启动 job 后轮询进度，完成时 toast + 清勾选 + 静默刷新列表。
-const doneKeys = { identify: 'identifyDone', fixEnc: 'fixMojiDone', script: 'scriptDone', convert: 'fmtDone' }
+// 启动 job 后轮询进度，完成时提示成功/失败计数 + 清勾选 + 静默刷新列表。
 const failKeys = { identify: 'identifyFail', fixEnc: 'fixMojiFail', script: 'scriptFail', convert: 'fmtFail' }
 
 async function runToolJob(kind, url, body) {
@@ -24,16 +23,16 @@ async function runToolJob(kind, url, body) {
   try {
     const r = await api(url, { method: 'POST', body: JSON.stringify(body) });
     if (!r.jobId) { // 无目标（如识别：库内无待识别曲目）
-      toast(t(doneKeys[kind], { ok: 0, t: 0 }), 'err');
+      toast(t('jobDone', { ok: 0, fail: 0, t: 0 }), 'err');
       return;
     }
-    await startToolJob(r.jobId, r.total);
+    await startToolJob(r.jobId, r.total, kind);
     // 等待任务完成（startToolJob 立即返回，完成信号通过状态轮询到位）
     const iv = setInterval(() => {
       const tj = state.toolJob;
       if (tj && tj.finished) {
         clearInterval(iv);
-        toast(t(doneKeys[kind], { ok: tj.ok, t: tj.total }), tj.ok === tj.total ? 'ok' : 'err');
+        toast(t('jobDone', { ok: tj.ok, fail: tj.fail, skip: tj.skip, t: tj.total }), tj.fail === 0 ? 'ok' : 'err');
         state.selected.clear();
         refresh();
         if (kind === 'convert') fmtOpen.value = false;

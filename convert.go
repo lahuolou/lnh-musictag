@@ -82,14 +82,14 @@ func convertHandler(js *jobStore, s *store) http.HandlerFunc {
 		if target0 == "keep" {
 			target0 = ""
 		}
-		job := js.runProgressJob(len(list), func(j *scrapeJob, i int) scrapeResult {
+		job := js.runProgressJob("convert", len(list), func(j *scrapeJob, i int) scrapeResult {
 			t := list[i]
 			j.mu.Lock()
 			j.Current = t.FileName
 			j.mu.Unlock()
 			srcExt := strings.ToLower(strings.TrimPrefix(t.Ext, "."))
 			if len(inSet) > 0 && !inSet[srcExt] {
-				return scrapeResult{ID: t.ID, FileName: t.FileName, OK: false, Message: "跳过（输入格式不在所选范围）"}
+				return scrapeResult{ID: t.ID, FileName: t.FileName, Skip: true, Message: "跳过（输入格式不在所选范围）"}
 			}
 			target := target0
 			if target == "" {

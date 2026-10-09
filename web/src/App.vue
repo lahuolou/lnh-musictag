@@ -1,6 +1,6 @@
 <script setup>
 import { onMounted, ref } from 'vue'
-import { state, logout } from './store.js'
+import { state, logout, resumeJobs } from './store.js'
 import { api } from './api.js'
 import { t, lang, setLang } from './i18n.js'
 import Login from './views/Login.vue'
@@ -40,6 +40,7 @@ onMounted(async () => {
     state.authed = false;
   }
   loadVersion();
+  if (state.authed) resumeJobs(); // 刷新/换设备后恢复进行中的批量任务进度
 });
 </script>
 

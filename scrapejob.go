@@ -123,6 +123,7 @@ func applySkipFilled(t *model.Track, f *ScrapeFields) bool {
 
 type scrapeJob struct {
 	ID      string         `json:"id"`
+	Kind    string         `json:"kind"` // scrape | convert | identify | fixEnc | script
 	Total   int            `json:"total"`
 	Done    int            `json:"done"`
 	Current string         `json:"current"`
@@ -139,6 +140,7 @@ type scrapeResult struct {
 	ID       string `json:"id"`
 	FileName string `json:"fileName"`
 	OK       bool   `json:"ok"`
+	Skip     bool   `json:"skip,omitempty"`
 	Message  string `json:"message"`
 }
 
@@ -149,8 +151,8 @@ type jobStore struct {
 
 func newJobStore() *jobStore { return &jobStore{jobs: map[string]*scrapeJob{}} }
 
-func (js *jobStore) create(total int) *scrapeJob {
-	j := &scrapeJob{ID: randomToken(), Total: total, Status: "running"}
+func (js *jobStore) create(total int, kind string) *scrapeJob {
+	j := &scrapeJob{ID: randomToken(), Kind: kind, Total: total, Status: "running"}
 	js.mu.Lock()
 	js.jobs[j.ID] = j
 	js.mu.Unlock()
@@ -163,11 +165,32 @@ func (js *jobStore) get(id string) *scrapeJob {
 	return js.jobs[id]
 }
 
+// active returns snapshots of all running jobs. The frontend calls this on
+// login/refresh so tasks keep showing progress across page reloads and devices
+// (the job itself runs in this process; a container restart cancels it).
+func (js *jobStore) active() []*scrapeJob {
+	js.mu.Lock()
+	defer js.mu.Unlock()
+	out := []*scrapeJob{}
+	for _, j := range js.jobs {
+		if j.Status != "running" {
+			continue
+		}
+		j.mu.Lock()
+		out = append(out, &scrapeJob{
+			ID: j.ID, Kind: j.Kind, Total: j.Total, Done: j.Done,
+			Current: j.Current, Status: j.Status, Results: append([]scrapeResult(nil), j.Results...),
+		})
+		j.mu.Unlock()
+	}
+	return out
+}
+
 // runProgressJob 启动通用后台任务（格式转换 / 音频识别 / 乱码修复 / 简繁转换）：
 // 串行处理 total 项，每完成一项更新 Done/Current/Results，
 // 前端通过 GET /api/jobs/{id} 轮询可视化进度。
-func (js *jobStore) runProgressJob(total int, step func(j *scrapeJob, i int) scrapeResult) *scrapeJob {
-	job := js.create(total)
+func (js *jobStore) runProgressJob(kind string, total int, step func(j *scrapeJob, i int) scrapeResult) *scrapeJob {
+	job := js.create(total, kind)
 	go func() {
 		for i := 0; i < total; i++ {
 			r := step(job, i)
@@ -207,9 +230,17 @@ func batchScrapeHandler(js *jobStore, store *store, ms *scrape.MultiSource) http
 			req.Source = "auto"
 		}
 		fields := fieldsFromList(req.Fields, req.FetchCover, req.FetchLyrics)
-		job := js.create(len(req.IDs))
+		job := js.create(len(req.IDs), "scrape")
 		go runBatch(job, store, ms, req.Source, req.IDs, fields, req.SkipFilled)
 		writeJSON(w, http.StatusOK, map[string]any{"jobId": job.ID, "total": job.Total})
+	}
+}
+
+// activeJobsHandler lists all running jobs so the UI can resume polling after
+// a page reload or when signing in from another device.
+func activeJobsHandler(js *jobStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{"jobs": js.active()})
 	}
 }
 
@@ -260,16 +291,17 @@ func runBatch(job *scrapeJob, store *store, ms *scrape.MultiSource, source strin
 		job.mu.Unlock()
 
 		msg, ok := scrapeOneTrack(t, ms, source, fields, skipFilled, store)
+		skip := strings.Contains(msg, "智能跳过")
 		// 完成后把最新曲目快照加入增量队列（前端据此实时更新列表，不整表刷新）
 		if nt := store.get(t.ID); nt != nil {
 			job.mu.Lock()
 			job.Updated = append(job.Updated, nt)
-			job.Results = append(job.Results, scrapeResult{ID: t.ID, FileName: t.FileName, OK: ok, Message: msg})
+			job.Results = append(job.Results, scrapeResult{ID: t.ID, FileName: t.FileName, OK: ok, Skip: skip, Message: msg})
 			job.Done++
 			job.mu.Unlock()
 		} else {
 			job.mu.Lock()
-			job.Results = append(job.Results, scrapeResult{ID: t.ID, FileName: t.FileName, OK: ok, Message: msg})
+			job.Results = append(job.Results, scrapeResult{ID: t.ID, FileName: t.FileName, OK: ok, Skip: skip, Message: msg})
 			job.Done++
 			job.mu.Unlock()
 		}

@@ -1,6 +1,6 @@
 <script setup>
 import { ref } from 'vue'
-import { state } from '../store.js'
+import { state, resumeJobs } from '../store.js'
 import { api } from '../api.js'
 import { t } from '../i18n.js'
 
@@ -20,6 +20,7 @@ async function doLogin() {
     await api('/api/login', { method: 'POST', body: JSON.stringify({ user: user.value.trim(), pass: pass.value }) });
     state.authed = true;
     state.user = user.value.trim();
+    resumeJobs(); // 换设备登录：接回服务端仍在运行的批量任务
   } catch (e) { msg.value = e.message; }
   finally { busy.value = false; }
 }

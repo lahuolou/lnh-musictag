@@ -62,9 +62,11 @@ export async function startBatchPoll(jobId) {
       mergeTracks(job.updated || []);
       if (job.status === 'done') {
         stopBatchPoll();
-        const ok = (job.results || []).filter(r => r.ok).length;
-        const skipped = (job.results || []).filter(r => r.ok && /智能跳过/.test(r.message || '')).length;
-        toast(t('batchFinish', { ok, t: job.total, s: skipped ? t('skipped', { n: skipped }) : '' }), ok === job.total ? 'ok' : 'err');
+        const rs = job.results || [];
+        const ok = rs.filter(r => r.ok).length;
+        const fail = rs.filter(r => !r.ok && !r.skip).length;
+        const skip = rs.filter(r => r.skip).length;
+        toast(t('batchFinish', { ok, fail, skip, t: job.total }), fail === 0 ? 'ok' : 'err');
         state.selected.clear();
         state.batchJob = null;
         await refresh(); // 兜底同步一次，保证与后端完全一致
@@ -90,9 +92,9 @@ let _toolTimer = null;
 // 通用工具任务轮询：音频识别 / 格式转换 / 乱码修复 / 简繁转换。
 // 与批量补全共用“后台运行、进度全局可见”的模式，任务完成后置 finished，
 // 由发起组件负责 toast、清勾选与刷新。
-export async function startToolJob(jobId, total) {
+export async function startToolJob(jobId, total, kind = 'tool') {
   stopToolJob();
-  state.toolJob = { id: jobId, total, done: 0, current: '', status: 'running', ok: 0, errors: [], finished: false };
+  state.toolJob = { id: jobId, kind, total, done: 0, current: '', status: 'running', ok: 0, fail: 0, skip: 0, errors: [], finished: false };
   const poll = async () => {
     try {
       const j = await api('/api/jobs/' + encodeURIComponent(jobId));
@@ -104,8 +106,10 @@ export async function startToolJob(jobId, total) {
         stopToolJob();
         tj.status = 'done';
         tj.finished = true;
+        tj.skip = (j.results || []).filter(r => r.skip).length;
         tj.ok = (j.results || []).filter(r => r.ok).length;
-        tj.errors = (j.results || []).filter(r => !r.ok && r.message);
+        tj.fail = (j.results || []).filter(r => !r.ok && !r.skip).length;
+        tj.errors = (j.results || []).filter(r => !r.ok && !r.skip && r.message);
       }
     } catch (e) { /* 瞬时网络抖动忽略，下一轮再试 */ }
   };
@@ -115,6 +119,24 @@ export async function startToolJob(jobId, total) {
 
 export function stopToolJob() {
   if (_toolTimer) { clearInterval(_toolTimer); _toolTimer = null; }
+}
+
+// 恢复进行中的任务：页面刷新或换设备登录后，把后端仍在运行的任务接回来，
+// 继续展示进度直到完成。kind 决定完成提示的文案。
+export async function resumeJobs() {
+  try {
+    const r = await api('/api/jobs');
+    const jobs = r.jobs || [];
+    for (const j of jobs) {
+      if (j.kind === 'scrape') {
+        await startBatchPoll(j.id);
+      } else if (j.status === 'running') {
+        await startToolJob(j.id, j.total, j.kind);
+        // 只接管第一个工具任务，其余保持可见于服务端记录
+        break;
+      }
+    }
+  } catch (e) { /* 静默：无任务或接口异常不影响使用 */ }
 }
 
 export async function loadSources() {
