@@ -1,8 +1,9 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { state, logout, resumeJobs, verState, checkVersion } from './store.js'
 import { api } from './api.js'
 import { t, lang, setLang } from './i18n.js'
+import Home from './views/Home.vue'
 import Login from './views/Login.vue'
 import MusicTree from './components/MusicTree.vue'
 import EditPanel from './components/EditPanel.vue'
@@ -23,9 +24,13 @@ function toggleTheme() { theme.value = theme.value === 'dark' ? 'light' : 'dark'
 
 function tab(name) { state.activeTab = name; }
 function toggleLang() { setLang(lang.value === 'zh' ? 'en' : 'zh'); }
+function goHome() { state.view = 'home'; }
 
 const aboutOpen = ref(false)
 const gearOpen = ref(false)
+
+// 登录成功后自动从公开首页进入后台
+watch(() => state.authed, v => { if (v) state.view = 'app'; })
 
 onMounted(async () => {
   applyTheme();
@@ -33,6 +38,7 @@ onMounted(async () => {
     const m = await api('/api/me');
     state.authed = true;
     state.user = m.user;
+    state.view = 'app'; // 已有会话（刷新恢复）直接进后台
   } catch (e) {
     state.authed = false;
   }
@@ -42,8 +48,13 @@ onMounted(async () => {
 </script>
 
 <template>
-  <Login v-if="!state.authed" />
+  <!-- 公开首页：搜索占位，无需登录；登录/进入后台切到后台区 -->
+  <Home v-if="state.view === 'home'" />
+
+  <!-- 后台区：登录页 + 登录后的全部管理页面 -->
   <template v-else>
+    <Login v-if="!state.authed" />
+    <template v-else>
     <nav class="topnav">
       <span class="brand">{{ t('brand') }}</span>
       <span class="spacer"></span>
@@ -61,6 +72,7 @@ onMounted(async () => {
       <button class="ghost sm" :title="lang === 'zh' ? 'Switch to English' : '切换到中文'" @click="toggleLang">{{ lang === 'zh' ? 'EN' : '中' }}</button>
       <button class="navlink" :title="theme === 'dark' ? t('lightMode') : t('darkMode')" @click="toggleTheme">{{ theme === 'dark' ? '🌙' : '☀️' }}</button>
       <button class="ghost sm" :class="{ on: state.activeTab !== 'settings' && state.activeTab !== 'plugins' }" @click="tab('list')">{{ t('list') }}</button>
+      <button class="ghost sm" :title="t('home')" @click="goHome">🏠</button>
       <!-- 齿轮二级导航：设置 / 关于 / 检查更新 / 退出（悬停或点击弹出） -->
       <div class="gear" :class="{ open: gearOpen }" @click="gearOpen = !gearOpen">
         <button class="ghost sm gear-btn" :title="t('menu')">
@@ -102,6 +114,7 @@ onMounted(async () => {
     <div v-else class="page">
       <Settings />
     </div>
+    </template>
   </template>
   <UpdateModal :open="verState.showUpdate" :data="verState.ver" @close="verState.showUpdate = false" @later="verState.showUpdate = false" @view="verState.showUpdate = false" />
   <AboutModal :open="aboutOpen" @close="aboutOpen = false" />

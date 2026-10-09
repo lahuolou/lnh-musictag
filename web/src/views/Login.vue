@@ -4,6 +4,7 @@ import { state, resumeJobs, checkVersion } from '../store.js'
 import { api } from '../api.js'
 import { t } from '../i18n.js'
 
+const emit = defineEmits(['done'])
 const user = ref('admin')
 const pass = ref('')
 const msg = ref('')
@@ -20,6 +21,7 @@ async function doLogin() {
     await api('/api/login', { method: 'POST', body: JSON.stringify({ user: user.value.trim(), pass: pass.value }) });
     state.authed = true;
     state.user = user.value.trim();
+    emit('done'); // 关闭登录弹层（App 监听到 authed 自动切到后台）
     resumeJobs(); // 换设备登录：接回服务端仍在运行的批量任务
     checkVersion(); // 登录后检查新版本，有更新则弹出提醒（无更新不弹）
   } catch (e) { msg.value = e.message; }

@@ -32,7 +32,7 @@ import (
 // AppVersion 当前版本号（与 GitHub Release tag 比较，用于“新版本提示”）。
 // 每次发布新版本时同步 bump（发布流程约束：推送前 bump 版本并打对应 Release tag，
 // 否则项目内“检查更新”会因 current==latest 而检测不到新版本）。
-const AppVersion = "1.4.1"
+const AppVersion = "1.4.2"
 
 //go:embed web/dist
 var webFS embed.FS
@@ -329,7 +329,7 @@ func main() {
 		writeJSON(w, http.StatusOK, ms.Sources())
 	})
 	// 通用插件设置接口：列出/启停/配置全部插件（刮削源、FFmpeg、预留类型）
-	pm.HandleFunc("GET /api/plugins", pluginsHandler)
+	pm.HandleFunc("GET /api/plugins", pluginsHandler(cfg))
 	pm.HandleFunc("POST /api/plugins", pluginsUpdateHandler(cfg))
 	pm.HandleFunc("POST /api/convert", convertHandler(jobs, store, cfg))
 	pm.HandleFunc("GET /api/ffmpeg/status", func(w http.ResponseWriter, r *http.Request) {

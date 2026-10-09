@@ -98,9 +98,17 @@ docker run -d --name lnh-musictag --restart unless-stopped \
 
 ### Scraping sources
 
-**Domestic (no key):** NetEase Cloud, QQ Music, Kugou, Kuwo, Migu, Qishui, 5sing, Bilibili, Baidu (legacy)
-**International (no key):** MusicBrainz, iTunes/Apple Music, Deezer, ListenBrainz, AcoustID (needs key for lookup)
-**International (free key):** Last.fm, Discogs, Jamendo, Spotify
+**Domestic (no key, enabled by default):** NetEase Cloud, QQ Music, Kugou, Kuwo, Migu, Qishui, 5sing, Bilibili, Baidu (legacy)
+**International (no key, enabled by default):** MusicBrainz, iTunes/Apple Music, Deezer, ListenBrainz, AcoustID (needs key for lookup)
+**International (free key, **disabled by default** — enable after filling the key in Settings → Database config):** Last.fm, Discogs, Jamendo, Spotify
+
+> Key-based sources start **off** by default to avoid failed lookups; the Plugins page shows a 🔑 badge and points you to the Settings page to fill in the key.
+
+### UI layout
+
+- **Public home page** (`/`): brand + search box (placeholder, not wired yet) + feature highlights + login entry. No login required.
+- **Admin area**: everything after login — music library list / edit / batch / dedup / settings / plugins, all behind the gear menu and top bar.
+- Key-based scrape sources start **off** by default; the Plugins page shows a 🔑 badge and points to Settings → Database config to fill in the key.
 
 ### API overview
 
@@ -226,9 +234,17 @@ docker run -d --name lnh-musictag --restart unless-stopped \
 
 ### 刮削源清单
 
-**国内源（免 Key）：** 网易云、QQ 音乐、酷狗、酷我、咪咕、汽水、5sing、哔哩哔哩、百度（旧接口）
-**国际源（免 Key）：** MusicBrainz、iTunes/Apple Music、Deezer、ListenBrainz、AcoustID（查指纹需 Key）
-**国际源（需免费 Key）：** Last.fm、Discogs、Jamendo、Spotify
+**国内源（免 Key，默认开启）：** 网易云、QQ 音乐、酷狗、酷我、咪咕、汽水、5sing、哔哩哔哩、百度（旧接口）
+**国际源（免 Key，默认开启）：** MusicBrainz、iTunes/Apple Music、Deezer、ListenBrainz、AcoustID（查指纹需 Key）
+**国际源（需免费 Key，**默认关闭**——在「设置 → 数据库配置」填好 Key 后再开启）：** Last.fm、Discogs、Jamendo、Spotify
+
+> 需 Key 的源默认关闭，避免无效请求；插件页会显示 🔑 徽标并提示去设置页填写 Key。
+
+### 界面结构
+
+- **公开首页**（`/`）：品牌 + 搜索框（占位，暂未接入功能）+ 功能亮点 + 登录入口，无需登录。
+- **后台区**：登录后全部管理功能——音乐列表 / 编辑 / 批量 / 去重 / 设置 / 插件，经顶部栏与齿轮菜单进入。
+- 需 API Key 的刮削源默认关闭；插件页显示 🔑 徽标并引导去「设置 → 数据库配置」填写 Key。
 
 ### API 一览
 

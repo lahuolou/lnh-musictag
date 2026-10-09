@@ -5,6 +5,7 @@ import { t } from './i18n.js'
 export const state = reactive({
   authed: false,
   user: '',
+  view: 'home', // home=公开首页（搜索占位，无需登录）；app=后台（登录后）
   route: location.hash.slice(1) || '/',
   activeTab: 'list',
   tracks: [],
@@ -184,6 +185,7 @@ export async function loadDups() {
 export async function logout() {
   try { await api('/api/logout', { method: 'POST' }); } catch (e) { /* ignore */ }
   state.authed = false;
+  state.view = 'home'; // 退出回到公开首页
   state.route = '/';
   location.hash = '/';
 }

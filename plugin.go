@@ -38,6 +38,9 @@ type Plugin struct {
 	Enabled    bool              `json:"enabled"`
 	Builtin    bool              `json:"builtin"`    // 内置不可删除；auto 等不可停用
 	Installable bool             `json:"installable"` // 支持一键安装（容器内执行）
+	NeedsKey   bool              `json:"needsKey"`    // 依赖外部 API Key（默认关闭，配置后开启）
+	KeyField   string            `json:"keyField,omitempty"`   // 对应设置库 Key 键名
+	KeyConfigured bool           `json:"keyConfigured"` // 当前 Key 是否已配置（快照时由 API 层计算）
 	Version    string            `json:"version,omitempty"`
 	Hint       string            `json:"hint,omitempty"`
 	Fields     []PluginField     `json:"fields,omitempty"`
@@ -163,6 +166,11 @@ func loadPluginsFromDB(cfg *cstore.Config) {
 			enabled = *r.Enabled
 		}
 		if p.Builtin { // 内置不可停用（如 auto）
+			enabled = true
+		}
+		// 用户要求：所有不需要 Key 的刮削源始终开启（无论旧配置）；
+		// 需 Key 的源保持按配置（默认关闭，配置 Key 后开启）。
+		if p.Kind == PluginScrape && !p.NeedsKey && !p.Builtin {
 			enabled = true
 		}
 		applyPluginState(p.Name, enabled, r.Config)

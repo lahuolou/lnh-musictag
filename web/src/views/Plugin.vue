@@ -19,6 +19,15 @@ const groupMeta = [
   { kind: 'protocol', key: 'protoPlugins', hint: 'protoPluginsHint', icon: '🌐' },
 ]
 
+// 需 Key 源 -> 设置页字段文案的 i18n 键（提示用户去「设置 → 数据库配置」填写）
+const keyLabelMap = {
+  lastfm_key: 'fLastfm',
+  spotify_id: 'fSpotifyId',
+  discogs_token: 'fDiscogs',
+  jamendo_client_id: 'fJamendo',
+}
+function keyLabel(p) { return keyLabelMap[p.keyField] || '' }
+
 const groups = computed(() => {
   const g = { scrape: [], tool: [], download: [], protocol: [] }
   for (const p of plugins.value) if (g[p.kind]) g[p.kind].push(p)
@@ -98,11 +107,20 @@ onMounted(() => { loadPlugins(); loadFFmpeg(); });
               {{ p.label }}
               <small class="muted">{{ p.name }}</small>
               <em v-if="p.builtin" class="builtin">{{ t('builtin') }}</em>
+              <em v-if="p.needsKey" class="key" :class="{ ok: p.keyConfigured }">🔑 {{ p.keyConfigured ? t('keySet') : t('keyNotSet') }}</em>
             </span>
             <label class="switch" :class="{ on: p.enabled }">
               <input type="checkbox" :checked="p.enabled" :disabled="busy || p.builtin" @change="togglePlugin(p)" />
               <span class="slider"></span>
             </label>
+          </div>
+
+          <!-- 需 Key 源：未配置时引导去设置页填写 -->
+          <div v-if="p.needsKey && !p.keyConfigured" class="key-tip">
+            → {{ t('keyGoSetting') }}「{{ t(keyLabel(p)) }}」
+          </div>
+          <div v-else-if="p.needsKey && !p.enabled" class="key-tip dim">
+            {{ t('keyReadyToEnable') }}
           </div>
 
           <!-- FFmpeg 实时状态 -->
@@ -141,7 +159,11 @@ onMounted(() => { loadPlugins(); loadFFmpeg(); });
 .prow { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .plabel { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .plabel small { opacity: .6; }
-.builtin { font-style: normal; font-size: 11px; padding: 1px 6px; border-radius: 6px; background: rgba(128,128,128,.18); }
+.builtin, .key { font-style: normal; font-size: 11px; padding: 1px 6px; border-radius: 6px; background: rgba(128,128,128,.18); }
+.key { background: rgba(230,148,61,.22); color: #e6943d; }
+.key.ok { background: rgba(48,164,108,.2); color: #30a46c; }
+.key-tip { margin-top: 6px; font-size: 12px; color: #e6943d; }
+.key-tip.dim { color: rgba(128,128,128,.7); }
 .switch { position: relative; display: inline-block; width: 40px; height: 22px; flex: none; }
 .switch input { opacity: 0; width: 0; height: 0; }
 .slider { position: absolute; cursor: pointer; inset: 0; background: rgba(128,128,128,.35); border-radius: 22px; transition: .2s; }
