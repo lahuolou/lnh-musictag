@@ -199,15 +199,27 @@ func matchAndWrite(s *store, ms *scrape.MultiSource, t *model.Track, fp string, 
 		}
 	}
 	const threshold = 0.85
-	if bestID == "" || bestSim < threshold {
-		return identifyResult{ID: t.ID, FileName: t.FileName, OK: false, Message: "音频内容未匹配到库内曲目（可稍后重试）"}
+	var title, artist string
+	var src *model.Track
+	if bestID != "" && bestSim >= threshold {
+		src = s.get(bestID)
+		if src != nil {
+			title = strings.TrimSpace(src.Tags["TITLE"])
+			artist = strings.TrimSpace(src.Tags["ARTIST"])
+		}
 	}
-	src := s.get(bestID)
 	if src == nil {
-		return identifyResult{ID: t.ID, FileName: t.FileName, OK: false, Message: "匹配来源丢失"}
+		// 库内未匹配到 → 外部 AcoustID 听声识曲（需设置页填 AcoustID API Key）
+		rec, aerr := ms.Client().LookupByFingerprint(fp, int(t.Duration))
+		if aerr == nil && rec.Title != "" && len(rec.Artists) > 0 {
+			return writeIdentify(s, ms, t, rec.Title, rec.Artists, rec.Releases, rec.FirstDate)
+		}
+		msg := "音频内容未匹配到库内曲目"
+		if aerr != nil && strings.Contains(aerr.Error(), "API Key") {
+			msg += "；如需外部听声识曲，请在设置页填写 AcoustID API Key"
+		}
+		return identifyResult{ID: t.ID, FileName: t.FileName, OK: false, Message: msg}
 	}
-	title := strings.TrimSpace(src.Tags["TITLE"])
-	artist := strings.TrimSpace(src.Tags["ARTIST"])
 	if title == "" {
 		return identifyResult{ID: t.ID, FileName: t.FileName, OK: false, Message: "匹配来源无标题"}
 	}
@@ -239,4 +251,25 @@ func matchAndWrite(s *store, ms *scrape.MultiSource, t *model.Track, fp string, 
 	}
 	refreshTrack(s, t.Path)
 	return identifyResult{ID: t.ID, FileName: t.FileName, OK: true, Title: title, Artist: artist, Message: "已识别：" + title + (func() string { if artist != "" { return " - " + artist }; return "" })()}
+}
+
+// writeIdentify applies an AcoustID-recognized recording to a track and
+// fetches lyrics for it.
+func writeIdentify(s *store, ms *scrape.MultiSource, t *model.Track, title string, artists []string, releases []scrape.Release, date string) identifyResult {
+	tags := map[string][]string{taglibx.Title: {title}, taglibx.Artist: artists}
+	if len(releases) > 0 && strings.TrimSpace(releases[0].Title) != "" {
+		tags[taglibx.Album] = []string{releases[0].Title}
+	}
+	if strings.TrimSpace(date) != "" {
+		tags[taglibx.Date] = []string{date}
+	}
+	if err := taglibx.WriteTags(t.Path, tags, false); err != nil {
+		return identifyResult{ID: t.ID, FileName: t.FileName, OK: false, Message: "写标签失败: " + err.Error()}
+	}
+	sr := scrape.SearchResult{Title: title, Artists: artists}
+	if lyric, err := ms.FetchLyrics(sr); err == nil && strings.TrimSpace(lyric) != "" {
+		taglibx.WriteTags(t.Path, map[string][]string{taglibx.Lyrics: {lyric}}, false)
+	}
+	refreshTrack(s, t.Path)
+	return identifyResult{ID: t.ID, FileName: t.FileName, OK: true, Title: title, Artist: strings.Join(artists, " / "), Message: "已识别：" + title + " - " + strings.Join(artists, " / ")}
 }

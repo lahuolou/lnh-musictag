@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { state, toast, refresh, loadSources } from '../store.js'
 import { api } from '../api.js'
+import { t } from '../i18n.js'
 
 const q = ref('')
 const filter = ref('all')
@@ -46,13 +47,13 @@ const filtered = computed(() => {
   return list;
 });
 const filterOpts = [
-  { id: 'all', label: '全部' },
-  { id: 'garbled', label: '乱码' },
-  { id: 'trad', label: '繁体' },
-  { id: 'nolyric', label: '无歌词' },
-  { id: 'nocover', label: '无封面' },
-  { id: 'noartist', label: '无艺术家' },
-  { id: 'needsid', label: '待识别' }
+  { id: 'all', label: () => t('filterAll') },
+  { id: 'garbled', label: () => t('filterMoji') },
+  { id: 'trad', label: () => t('filterTrad') },
+  { id: 'nolyric', label: () => t('bLyrics') },
+  { id: 'nocover', label: () => t('bCover') },
+  { id: 'noartist', label: () => t('filterNoArtist') },
+  { id: 'needsid', label: () => t('filterNeedIdentify') }
 ];
 const filtering = computed(() => q.value.trim() !== '' || filter.value !== 'all');
 
@@ -146,15 +147,30 @@ function openTrack(t) {
   state.activeTab = 'edit';
 }
 
+// 列表页选中删除文件（二次确认；同时删除磁盘文件并清理列表）
+async function delSel() {
+  if (state.selected.size === 0) { toast(t('selFirst'), 'err'); return; }
+  if (!confirm(t('delConfirm', { n: state.selected.size }))) return;
+  try {
+    const r = await api('/api/tracks/delete', {
+      method: 'POST', body: JSON.stringify({ ids: [...state.selected] })
+    });
+    const failed = r.failed || [];
+    toast(t('delDone', { n: r.removed }) + (failed.length ? t('delFailed', { f: failed.length, first: failed[0] }) : ''), failed.length ? 'err' : 'ok');
+    state.selected.clear();
+    await refresh();
+  } catch (e) { toast(t('delFail', { m: e.message }), 'err'); }
+}
+
 async function scan() {
   const dir = scanDir.value.trim();
-  if (!dir) { toast('请输入目录路径', 'err'); return; }
-  scanMsg.value = '扫描中…';
+  if (!dir) { toast(t('enterKeyword'), 'err'); return; }
+  scanMsg.value = t('scanning') + '…';
   try {
     await api('/api/scan', { method: 'POST', body: JSON.stringify({ dir }) });
-    toast('扫描已开始，边扫边出', 'ok');
+    toast(t('scanStarted'), 'ok');
     startPoll();
-  } catch (e) { toast('扫描失败: ' + e.message, 'err'); scanMsg.value = ''; }
+  } catch (e) { toast(t('searchFail', { m: e.message }), 'err'); scanMsg.value = ''; }
 }
 async function tick() {
   try {
@@ -162,9 +178,16 @@ async function tick() {
     state.scanStatus = st;
     if (st.running) {
       try { state.tracks = await api('/api/tracks'); } catch (e) {}
-      scanMsg.value = '扫描中… 已加载 ' + st.added + ' 首 / 发现 ' + st.total + (st.skipped ? '（智能跳过 ' + st.skipped + '）' : '');
+      scanMsg.value = t('scanningMsg', {
+        a: st.added, t: st.total, s: st.skipped ? t('skipped', { n: st.skipped }) : ''
+      });
     } else {
-      scanMsg.value = '扫描完成：共 ' + st.added + ' 首' + (st.skipped ? '（智能跳过 ' + st.skipped + '）' : '') + (st.error ? '（' + st.error + '）' : '');
+      scanMsg.value = t('scanDone', {
+        a: st.added,
+        s: st.skipped ? t('skipped', { n: st.skipped }) : '',
+        r: st.removed ? t('removedCleaned', { n: st.removed }) : '',
+        e: st.error ? '（' + st.error + '）' : ''
+      });
       stopPoll();
       await refresh();
     }
@@ -177,8 +200,8 @@ async function togglePause() {
   try {
     const r = await api('/api/scan/pause', { method: 'POST', body: JSON.stringify({ paused: !state.scanStatus.paused }) });
     state.scanStatus = r;
-    toast(r.paused ? '已暂停扫描' : '已继续扫描', 'ok');
-  } catch (e) { toast('操作失败: ' + e.message, 'err'); }
+    toast(r.paused ? t('scanPaused') : t('scanResumed'), 'ok');
+  } catch (e) { toast(t('delFail', { m: e.message }), 'err'); }
 }
 
 onMounted(async () => { await loadSources(); await refresh(); if (state.scanStatus.running) startPoll(); });
@@ -189,21 +212,25 @@ onBeforeUnmount(stopPoll);
   <div class="music-list">
     <div class="ml-toolbar">
       <div class="row">
-        <input type="text" v-model="scanDir" placeholder="容器内音频目录，如 /music" @keydown.enter="scan" style="min-width:0" />
-        <button class="sm" @click="scan" :disabled="state.scanStatus.running">{{ state.scanStatus.running ? '扫描中' : '扫描' }}</button>
-        <button v-if="state.scanStatus.running" class="ghost sm" @click="togglePause">{{ state.scanStatus.paused ? '继续' : '暂停' }}</button>
+        <input type="text" v-model="scanDir" :placeholder="t('scanPlaceholder')" @keydown.enter="scan" style="min-width:0" />
+        <button class="sm" @click="scan" :disabled="state.scanStatus.running">{{ state.scanStatus.running ? t('scanning') : t('scan') }}</button>
+        <button v-if="state.scanStatus.running" class="ghost sm" @click="togglePause">{{ state.scanStatus.paused ? t('resume') : t('pause') }}</button>
       </div>
       <div class="row" style="margin-top:8px">
-        <input type="text" v-model="q" placeholder="输入即搜索 歌名" style="min-width:0" />
+        <input type="text" v-model="q" :placeholder="t('searchPlaceholder')" style="min-width:0" />
       </div>
       <div class="filters" style="margin-top:8px">
-        <button v-for="f in filterOpts" :key="f.id" class="chip" :class="{ on: filter === f.id }" @click="filter = f.id">{{ f.label }}</button>
+        <button v-for="f in filterOpts" :key="f.id" class="chip" :class="{ on: filter === f.id }" @click="filter = f.id">{{ f.label() }}</button>
       </div>
-      <div class="loading" style="margin-top:6px">{{ scanMsg }}{{ state.scanStatus.paused ? '（已暂停）' : '' }}</div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+        <button v-if="state.selected.size > 0" class="ghost sm danger" @click="delSel">{{ t('deleteSel', { n: state.selected.size }) }}</button>
+        <button v-if="state.selected.size > 0" class="ghost sm" @click="state.selected.clear()">{{ t('clearSel') }}</button>
+      </div>
+      <div class="loading" style="margin-top:6px">{{ scanMsg }}{{ state.scanStatus.paused ? t('pausedMark') : '' }}</div>
     </div>
 
     <div class="ml-head">
-      {{ filtering ? '匹配 ' + filtered.length + ' / 共 ' + state.tracks.length : '曲目 ' + state.tracks.length }} · 勾选后到「批量」补全 · 点击行进「编辑」
+      {{ filtering ? t('matchInfo', { m: filtered.length, n: state.tracks.length }) : t('trackCount', { n: state.tracks.length }) }}
     </div>
 
     <div class="tree-scroll" @scroll.passive="onScroll">
@@ -211,16 +238,16 @@ onBeforeUnmount(stopPoll);
         <thead>
           <tr>
             <th style="width:30px"><input type="checkbox" class="tchk" :checked="isAllSel()" @change="toggleAll" /></th>
-            <th style="width:46px">封面</th>
-            <th class="th-sort" @click="setSort('title')">标题 {{ sortIcon('title') }}</th>
-            <th class="th-sort" @click="setSort('artist')">艺术家 {{ sortIcon('artist') }}</th>
-            <th class="th-sort" @click="setSort('album')">专辑 {{ sortIcon('album') }}</th>
-            <th class="th-sort" @click="setSort('albumartist')">专辑艺术家 {{ sortIcon('albumartist') }}</th>
-            <th style="width:52px">歌词</th>
+            <th style="width:46px">{{ t('cover') }}</th>
+            <th class="th-sort" @click="setSort('title')">{{ t('hTitle') }} {{ sortIcon('title') }}</th>
+            <th class="th-sort" @click="setSort('artist')">{{ t('hArtist') }} {{ sortIcon('artist') }}</th>
+            <th class="th-sort" @click="setSort('album')">{{ t('hAlbum') }} {{ sortIcon('album') }}</th>
+            <th class="th-sort" @click="setSort('albumartist')">{{ t('hAlbumArtist') }} {{ sortIcon('albumartist') }}</th>
+            <th style="width:52px">{{ t('hLyric') }}</th>
             <th style="width:46px">LRC</th>
-            <th class="th-sort" style="width:60px" @click="setSort('year')">年份 {{ sortIcon('year') }}</th>
-            <th class="th-sort" @click="setSort('genre')">风格 {{ sortIcon('genre') }}</th>
-            <th class="th-sort" style="width:64px" @click="setSort('size')">大小 {{ sortIcon('size') }}</th>
+            <th class="th-sort" style="width:60px" @click="setSort('year')">{{ t('hYear') }} {{ sortIcon('year') }}</th>
+            <th class="th-sort" @click="setSort('genre')">{{ t('hGenre') }} {{ sortIcon('genre') }}</th>
+            <th class="th-sort" style="width:64px" @click="setSort('size')">{{ t('hSize') }} {{ sortIcon('size') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -234,21 +261,21 @@ onBeforeUnmount(stopPoll);
             <td :title="t.tags.ARTIST ? t.tags.ARTIST : nameArtist(t)">{{ displayArtist(t) }}</td>
             <td>{{ t.tags.ALBUM || '' }}</td>
             <td>{{ t.tags.ALBUMARTIST || '' }}</td>
-            <td>{{ hasLyrics(t) ? '有' : '无' }}</td>
-            <td :title="t.hasLrcFile ? '同目录外挂 .lrc 歌词' : ''">{{ lrcMark(t) }}</td>
+            <td>{{ hasLyrics(t) ? t('hasLyric') : t('none') }}</td>
+            <td :title="t.hasLrcFile ? t('lrcTitle') : ''">{{ lrcMark(t) }}</td>
             <td>{{ t.tags.DATE || '' }}</td>
             <td>{{ t.tags.GENRE || '' }}</td>
             <td class="muted">{{ fmtSize(t.size) }}</td>
           </tr>
           <tr v-if="!shown.length">
             <td colspan="11" class="muted" style="padding:16px;text-align:center">
-              {{ state.tracks.length ? '没有匹配的曲目，换个关键词或筛选试试。' : '还没有曲目，先在上方输入目录扫描。' }}
+              {{ state.tracks.length ? t('noMatch') : t('noTracks') }}
             </td>
           </tr>
         </tbody>
       </table>
       <div v-if="visible < sorted.length" class="muted" style="padding:8px;text-align:center;font-size:12px">
-        已显示 {{ shown.length }} / {{ sorted.length }} 首，继续滚动加载更多…
+        {{ t('moreLoading', { x: shown.length, n: sorted.length }) }}
       </div>
     </div>
   </div>

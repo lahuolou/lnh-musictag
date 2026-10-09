@@ -7,8 +7,9 @@ import (
 )
 
 // qqSource searches QQ Music (QQ音乐). Primary endpoint is the modern
-// musicu.fcg gateway; the legacy client_search_cp endpoint is used as a
-// fallback for older networks.
+// musicu.fcg gateway; the classic search_for_qq_cp endpoint is used as a
+// fallback (musicu may return an empty list without a login cookie, and the
+// old client_search_cp endpoint returns HTTP 500).
 type qqSource struct{}
 
 func (qqSource) Name() string  { return "qq" }
@@ -95,9 +96,14 @@ func qqMusicu(c *Client, query string, limit int) ([]SearchResult, error) {
 }
 
 func qqLegacy(c *Client, query string, limit int) ([]SearchResult, error) {
-	u := "https://c.y.qq.com/soso/fcgi-bin/client_search_cp?p=1&n=" +
+	u := "https://c.y.qq.com/soso/fcgi-bin/search_for_qq_cp?p=1&n=" +
 		fmt.Sprint(limit) + "&w=" + url.QueryEscape(query) + "&format=json"
-	headers := map[string]string{"Referer": "https://y.qq.com/"}
+	// 注意：不能用 getJSON——腾讯 soso 接口对 Accept: application/json 头会
+	// 返回默认空响应（musicu 格式），必须不带 Accept 请求。
+	body, err := c.getBytes(u, map[string]string{"Referer": "https://y.qq.com/"})
+	if err != nil {
+		return nil, err
+	}
 	var resp struct {
 		Code int `json:"code"`
 		Data struct {
@@ -115,7 +121,7 @@ func qqLegacy(c *Client, query string, limit int) ([]SearchResult, error) {
 			} `json:"song"`
 		} `json:"data"`
 	}
-	if err := c.getJSON(u, headers, &resp); err != nil {
+	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, err
 	}
 	tracks := make([]qqTrack, 0, len(resp.Data.Song.List))

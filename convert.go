@@ -55,9 +55,22 @@ func convertHandler(s *store) http.HandlerFunc {
 		if br == "keep" {
 			br = ""
 		}
+		// 白名单：只允许常见比特率，拒绝任何畸形/注入输入
+		switch br {
+		case "", "64k", "128k", "192k", "256k", "320k":
+		default:
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid bitrate"})
+			return
+		}
 		sr := strings.ToLower(strings.TrimSpace(req.SampleRate))
 		if sr == "keep" {
 			sr = ""
+		}
+		switch sr {
+		case "", "44100", "48000", "88200", "96000":
+		default:
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid sample rate"})
+			return
 		}
 
 		list := resolveTracks(s, req.IDs)

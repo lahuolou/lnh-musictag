@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { state } from '../store.js'
 import { api } from '../api.js'
+import { t } from '../i18n.js'
 
 const user = ref('admin')
 const pass = ref('')
@@ -12,9 +13,9 @@ const busy = ref(false)
 async function doLogin() {
   if (busy.value) return;
   msg.value = '';
-  if (!user.value.trim() || !pass.value) { msg.value = '请输入账号和密码'; return; }
+  if (!user.value.trim() || !pass.value) { msg.value = t('loginEmpty'); return; }
   busy.value = true;
-  msg.value = '登录中…';
+  msg.value = t('loggingIn');
   try {
     await api('/api/login', { method: 'POST', body: JSON.stringify({ user: user.value.trim(), pass: pass.value }) });
     state.authed = true;
@@ -29,19 +30,19 @@ async function doLogin() {
     <div class="login-box">
       <div class="login-brand">🎵</div>
       <h2>LNH-MusicTag</h2>
-      <p class="login-sub">登录后台管理音乐库</p>
+      <p class="login-sub">{{ t('loginSub') }}</p>
       <div class="field">
-        <label>账号</label>
+        <label>{{ t('username') }}</label>
         <input type="text" v-model="user" autocomplete="username" @keydown.enter="doLogin" />
       </div>
       <div class="field">
-        <label>密码</label>
+        <label>{{ t('password') }}</label>
         <div class="pw-row">
           <input :type="showPw ? 'text' : 'password'" v-model="pass" autocomplete="current-password" @keydown.enter="doLogin" />
-          <button class="ghost sm" type="button" @click="showPw = !showPw" title="显示/隐藏">👁</button>
+          <button class="ghost sm" type="button" @click="showPw = !showPw" title="show/hide">👁</button>
         </div>
       </div>
-      <button class="login-btn" :disabled="busy" @click="doLogin">{{ busy ? '登录中…' : '登录' }}</button>
+      <button class="login-btn" :disabled="busy" @click="doLogin">{{ busy ? t('loggingIn') : t('loginBtn') }}</button>
       <div class="loading login-msg">{{ msg }}</div>
     </div>
   </div>

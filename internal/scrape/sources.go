@@ -50,8 +50,8 @@ type MultiSource struct {
 
 // Source preference groups used by auto: Chinese queries hit domestic sources
 // first, Latin-script queries hit international sources first.
-var domesticOrder = []string{"netease", "qq", "kugou", "kuwo", "migu", "bilibili", "qishui", "bodian"}
-var internationalOrder = []string{"musicbrainz", "itunes"}
+var domesticOrder = []string{"netease", "qq", "kugou", "kuwo", "migu", "bilibili", "qishui", "bodian", "fivesing"}
+var internationalOrder = []string{"itunes", "musicbrainz", "listenbrainz", "deezer", "lastfm", "spotify", "discogs", "jamendo"}
 
 // NewMultiSource registers all built-in sources (domestic first so the UI
 // dropdown and auto mode both prefer Chinese services).
@@ -65,8 +65,15 @@ func NewMultiSource() *MultiSource {
 	m.register(bilibiliSource{})
 	m.register(qishuiSource{})
 	m.register(bodianSource{})
+	m.register(fivesingSource{})
 	m.register(musicbrainzSource{})
 	m.register(itunesSource{})
+	m.register(listenbrainzSource{})
+	m.register(deezerSource{})
+	m.register(lastfmSource{})
+	m.register(spotifySource{})
+	m.register(discogsSource{})
+	m.register(jamendoSource{})
 	return m
 }
 

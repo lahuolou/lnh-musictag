@@ -162,6 +162,7 @@ type scanState struct {	mu      sync.Mutex
 	Total   int    `json:"total"` // audio files discovered so far
 	Done    int    `json:"done"`
 	Skipped int    `json:"skipped"` // 已知文件，智能跳过
+	Removed int    `json:"removed"` // 已从磁盘消失、从列表清理的文件数
 	Error   string `json:"error"`
 }
 
@@ -174,6 +175,7 @@ type scanStatus struct {
 	Total   int    `json:"total"`
 	Done    int    `json:"done"`
 	Skipped int    `json:"skipped"`
+	Removed int    `json:"removed"`
 	Error   string `json:"error"`
 }
 
@@ -182,7 +184,7 @@ func (st *scanState) snapshot() scanStatus {
 	defer st.mu.Unlock()
 	return scanStatus{
 		Running: st.Running, Paused: st.Paused, Dir: st.Dir, Added: st.Added,
-		Total: st.Total, Done: st.Done, Skipped: st.Skipped, Error: st.Error,
+		Total: st.Total, Done: st.Done, Skipped: st.Skipped, Removed: st.Removed, Error: st.Error,
 	}
 }
 
@@ -203,10 +205,11 @@ func (sm *scanManager) start(store *store, dir string, autoFix, autoRename bool)
 	sm.state = st
 	sm.mu.Unlock()
 	go func() {
-		added, err := scanDirLive(store, dir, st, autoFix, autoRename)
+		added, removed, err := scanDirLive(store, dir, st, autoFix, autoRename)
 		st.mu.Lock()
 		st.Running = false
 		st.Added = added
+		st.Removed = removed
 		if err != nil {
 			st.Error = err.Error()
 		}
@@ -249,6 +252,21 @@ func main() {
 	if k, ok := cfg.Get("acoustid_key"); ok && k != "" {
 		ms.Client().AcoustIDAPIKey = k
 	}
+	if k, ok := cfg.Get("lastfm_key"); ok && k != "" {
+		ms.Client().LastFMKey = k
+	}
+	if k, ok := cfg.Get("discogs_token"); ok && k != "" {
+		ms.Client().DiscogsToken = k
+	}
+	if k, ok := cfg.Get("jamendo_client_id"); ok && k != "" {
+		ms.Client().JamendoClientID = k
+	}
+	if v, ok := cfg.Get("spotify_id"); ok && v != "" {
+		ms.Client().SpotifyID = v
+	}
+	if v, ok := cfg.Get("spotify_secret"); ok && v != "" {
+		ms.Client().SpotifySecret = v
+	}
 
 	adminUser, adminPass, generated, err := bootstrapAdmin(cfg, os.Getenv("LNH_ADMIN_USER"), os.Getenv("LNH_ADMIN_PASS"))
 	if err != nil {
@@ -275,7 +293,7 @@ func main() {
 	pm.HandleFunc("POST /api/fix-encoding", fixEncodingHandler(store))
 	pm.HandleFunc("POST /api/convert-script", convertScriptHandler(store))
 	pm.HandleFunc("POST /api/identify", identifyHandler(store, ms))
-	mux.Handle("/api/", sessions.requireAuth(pm))
+	mux.Handle("/api/", sessions.requireAuth(csrfGuard(limitBody(pm))))
 
 	// Static UI (Vue SPA built into web/dist; /api/... routes win over this)
 	dist, _ := fs.Sub(webFS, "web/dist")
@@ -371,20 +389,30 @@ func main() {
 	// --- Config / settings (stored in DB) ---
 	pm.HandleFunc("GET /api/settings", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"adminUser":      cfg.GetDefault("admin_user", "admin"),
-			"acoustidKey":    cfg.GetDefault("acoustid_key", ""),
-			"autoFixTitle":   cfg.GetDefault("auto_fix_title", "1") == "1",
-			"autoRenameFile": cfg.GetDefault("auto_rename_file", "1") == "1",
-			"scanDir":        cfg.GetDefault("scan_dir", "/music"),
+			"adminUser":       cfg.GetDefault("admin_user", "admin"),
+			"acoustidKey":     cfg.GetDefault("acoustid_key", ""),
+			"lastfmKey":       cfg.GetDefault("lastfm_key", ""),
+			"discogsToken":    cfg.GetDefault("discogs_token", ""),
+			"jamendoClientID": cfg.GetDefault("jamendo_client_id", ""),
+			"spotifyID":       cfg.GetDefault("spotify_id", ""),
+			"spotifySecret":   cfg.GetDefault("spotify_secret", ""),
+			"autoFixTitle":    cfg.GetDefault("auto_fix_title", "1") == "1",
+			"autoRenameFile":  cfg.GetDefault("auto_rename_file", "1") == "1",
+			"scanDir":         cfg.GetDefault("scan_dir", "/music"),
 		})
 	})
 	pm.HandleFunc("POST /api/settings", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			AdminUser      *string `json:"adminUser"`
-			AcoustidKey    *string `json:"acoustidKey"`
-			AutoFixTitle   *bool   `json:"autoFixTitle"`
-			AutoRenameFile *bool   `json:"autoRenameFile"`
-			ScanDir        *string `json:"scanDir"`
+			AdminUser       *string `json:"adminUser"`
+			AcoustidKey     *string `json:"acoustidKey"`
+			LastfmKey       *string `json:"lastfmKey"`
+			DiscogsToken    *string `json:"discogsToken"`
+			JamendoClientID *string `json:"jamendoClientID"`
+			SpotifyID       *string `json:"spotifyID"`
+			SpotifySecret   *string `json:"spotifySecret"`
+			AutoFixTitle    *bool   `json:"autoFixTitle"`
+			AutoRenameFile  *bool   `json:"autoRenameFile"`
+			ScanDir         *string `json:"scanDir"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -398,6 +426,26 @@ func main() {
 		if req.AcoustidKey != nil {
 			cfg.Set("acoustid_key", strings.TrimSpace(*req.AcoustidKey))
 			ms.Client().AcoustIDAPIKey = strings.TrimSpace(*req.AcoustidKey)
+		}
+		if req.LastfmKey != nil {
+			cfg.Set("lastfm_key", strings.TrimSpace(*req.LastfmKey))
+			ms.Client().LastFMKey = strings.TrimSpace(*req.LastfmKey)
+		}
+		if req.DiscogsToken != nil {
+			cfg.Set("discogs_token", strings.TrimSpace(*req.DiscogsToken))
+			ms.Client().DiscogsToken = strings.TrimSpace(*req.DiscogsToken)
+		}
+		if req.JamendoClientID != nil {
+			cfg.Set("jamendo_client_id", strings.TrimSpace(*req.JamendoClientID))
+			ms.Client().JamendoClientID = strings.TrimSpace(*req.JamendoClientID)
+		}
+		if req.SpotifyID != nil {
+			cfg.Set("spotify_id", strings.TrimSpace(*req.SpotifyID))
+			ms.Client().SpotifyID = strings.TrimSpace(*req.SpotifyID)
+		}
+		if req.SpotifySecret != nil {
+			cfg.Set("spotify_secret", strings.TrimSpace(*req.SpotifySecret))
+			ms.Client().SpotifySecret = strings.TrimSpace(*req.SpotifySecret)
 		}
 		if req.AutoFixTitle != nil {
 			v := "0"
@@ -440,6 +488,30 @@ func main() {
 
 	// Remove selected duplicate files (user-choose which to keep first)
 	pm.HandleFunc("POST /api/duplicates/remove", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ IDs []string `json:"ids"` }
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		removed := 0
+		failed := []string{}
+		for _, id := range req.IDs {
+			t := store.get(id)
+			if t == nil {
+				continue
+			}
+			if err := os.Remove(t.Path); err != nil {
+				failed = append(failed, t.FileName)
+				continue
+			}
+			store.remove(id)
+			removed++
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"removed": removed, "failed": failed})
+	})
+
+	// 列表页选中删除文件（前端二次确认后调用；同时清理 store 与磁盘）
+	pm.HandleFunc("POST /api/tracks/delete", func(w http.ResponseWriter, r *http.Request) {
 		var req struct{ IDs []string `json:"ids"` }
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -741,7 +813,7 @@ func main() {
 	if generated {
 		log.Printf("[首次启动] 已生成随机初始密码并保存到数据库：%s（登录后请在“设置”页修改密码）", adminPass)
 	}
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	if err := http.ListenAndServe(addr, securityHeaders(mux)); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -761,13 +833,13 @@ var skipScanDirs = map[string]bool{
 	"node_modules": true, "$recycle.bin": true, ".git": true, ".svn": true,
 }
 
-func scanDirLive(s *store, dir string, st *scanState, autoFix, autoRename bool) (int, error) {
+func scanDirLive(s *store, dir string, st *scanState, autoFix, autoRename bool) (int, int, error) {
 	st0, err := os.Stat(dir)
 	if err != nil {
-		return 0, fmt.Errorf("cannot access %q: %w", dir, err)
+		return 0, 0, fmt.Errorf("cannot access %q: %w", dir, err)
 	}
 	if !st0.IsDir() {
-		return 0, fmt.Errorf("%q is not a directory", dir)
+		return 0, 0, fmt.Errorf("%q is not a directory", dir)
 	}
 	added := 0
 	err = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
@@ -842,7 +914,30 @@ func scanDirLive(s *store, dir string, st *scanState, autoFix, autoRename bool) 
 		st.mu.Unlock()
 		return nil
 	})
-	return added, err
+	if err != nil {
+		return added, 0, err
+	}
+	// 清理已消失文件：被其他程序/外部删除的曲目从列表同步移除
+	removed := reconcileRemoved(s, dir)
+	return added, removed, nil
+}
+
+// reconcileRemoved removes from the store any track under dir whose file no
+// longer exists on disk (deleted externally), keeping the list in sync.
+func reconcileRemoved(s *store, dir string) int {
+	removed := 0
+	dir = filepath.Clean(dir)
+	for _, t := range s.all() {
+		rel, err := filepath.Rel(dir, t.Path)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+		if _, err := os.Stat(t.Path); err != nil {
+			s.remove(t.ID)
+			removed++
+		}
+	}
+	return removed
 }
 
 // allTracksCount returns the current number of tracks in the store.

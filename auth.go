@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
@@ -16,6 +17,7 @@ import (
 const (
 	sessionCookie = "lnh_session"
 	sessionTTL    = 12 * time.Hour
+	passPrefix    = "sha256$" // 存储格式：sha256$salt$hash（拖库后不可逆）
 )
 
 // sessionStore holds active login sessions. The admin credentials live in the
@@ -26,6 +28,7 @@ type sessionStore struct {
 	sessions map[string]time.Time // token -> expiry
 	cfg      *cstore.Config
 	user     string
+	guard    *loginGuard
 }
 
 func newSessionStore(cfg *cstore.Config) *sessionStore {
@@ -33,6 +36,44 @@ func newSessionStore(cfg *cstore.Config) *sessionStore {
 		sessions: map[string]time.Time{},
 		cfg:      cfg,
 		user:     cfg.GetDefault("admin_user", "admin"),
+		guard:    newLoginGuard(),
+	}
+}
+
+// ---- 密码存储：加盐 SHA-256（标准库，零依赖），兼容旧明文自动迁移 ----
+
+func hashPassword(pw string) string {
+	salt := make([]byte, 16)
+	_, _ = rand.Read(salt)
+	sum := sha256.Sum256(append(append([]byte(nil), salt...), []byte(pw)...))
+	return passPrefix + hex.EncodeToString(salt) + "$" + hex.EncodeToString(sum[:])
+}
+
+func verifyPassword(stored, pw string) bool {
+	if strings.HasPrefix(stored, passPrefix) {
+		parts := strings.SplitN(stored, "$", 3)
+		if len(parts) != 3 {
+			return false
+		}
+		salt, err := hex.DecodeString(parts[1])
+		if err != nil {
+			return false
+		}
+		sum := sha256.Sum256(append(salt, []byte(pw)...))
+		want, err := hex.DecodeString(parts[2])
+		if err != nil {
+			return false
+		}
+		return subtle.ConstantTimeCompare(sum[:], want) == 1
+	}
+	// 旧版明文存储：constant-time 比较；调用方在成功后调用 upgradePassword 迁移为哈希
+	return subtle.ConstantTimeCompare([]byte(stored), []byte(pw)) == 1
+}
+
+// upgradePassword migrates a legacy plaintext password to a salted hash.
+func (s *sessionStore) upgradePassword(r *http.Request, newPass string) {
+	if err := s.cfg.Set("admin_pass", hashPassword(newPass)); err == nil {
+		s.guard.success(r)
 	}
 }
 
@@ -56,7 +97,7 @@ func bootstrapAdmin(cfg *cstore.Config, envUser, envPass string) (string, string
 	if err := cfg.Set("admin_user", user); err != nil {
 		return "", "", false, err
 	}
-	if err := cfg.Set("admin_pass", pw); err != nil {
+	if err := cfg.Set("admin_pass", hashPassword(pw)); err != nil {
 		return "", "", false, err
 	}
 	return user, pw, generated, nil
@@ -64,6 +105,10 @@ func bootstrapAdmin(cfg *cstore.Config, envUser, envPass string) (string, string
 
 // loginHandler validates credentials (from the DB) and issues a session cookie.
 func (s *sessionStore) loginHandler(w http.ResponseWriter, r *http.Request) {
+	if !s.guard.allow(r) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "失败次数过多，请 5 分钟后再试"})
+		return
+	}
 	var req struct {
 		User string `json:"user"`
 		Pass string `json:"pass"`
@@ -75,10 +120,20 @@ func (s *sessionStore) loginHandler(w http.ResponseWriter, r *http.Request) {
 	wantUser, _ := s.cfg.Get("admin_user")
 	wantPass, _ := s.cfg.Get("admin_pass")
 	okU := subtle.ConstantTimeCompare([]byte(req.User), []byte(wantUser)) == 1
-	okP := subtle.ConstantTimeCompare([]byte(req.Pass), []byte(wantPass)) == 1
+	okP := okU && verifyPassword(wantPass, req.Pass)
 	if !(okU && okP) {
+		if d := s.guard.fail(r); d > 0 {
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "失败次数过多，请 5 分钟后再试"})
+			return
+		}
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "账号或密码错误"})
 		return
+	}
+	// 旧版明文密码首次验证通过后自动升级为加盐哈希
+	if !strings.HasPrefix(wantPass, passPrefix) {
+		s.upgradePassword(r, req.Pass)
+	} else {
+		s.guard.success(r)
 	}
 	token := randomToken()
 	exp := time.Now().Add(sessionTTL)
@@ -124,7 +179,7 @@ func (s *sessionStore) changePasswordHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	cur, _ := s.cfg.Get("admin_pass")
-	if subtle.ConstantTimeCompare([]byte(req.OldPass), []byte(cur)) != 1 {
+	if !verifyPassword(cur, req.OldPass) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "旧密码错误"})
 		return
 	}
@@ -132,7 +187,7 @@ func (s *sessionStore) changePasswordHandler(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "新密码至少 6 位"})
 		return
 	}
-	if err := s.cfg.Set("admin_pass", req.NewPass); err != nil {
+	if err := s.cfg.Set("admin_pass", hashPassword(req.NewPass)); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "密码更新失败: " + err.Error()})
 		return
 	}

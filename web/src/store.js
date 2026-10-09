@@ -1,5 +1,6 @@
 import { reactive } from 'vue'
 import { api } from './api.js'
+import { t } from './i18n.js'
 
 export const state = reactive({
   authed: false,
@@ -62,7 +63,7 @@ export async function startBatchPoll(jobId) {
         stopBatchPoll();
         const ok = (job.results || []).filter(r => r.ok).length;
         const skipped = (job.results || []).filter(r => r.ok && /智能跳过/.test(r.message || '')).length;
-        toast('批量刮削完成：' + ok + '/' + job.total + ' 成功' + (skipped ? '（智能跳过 ' + skipped + '）' : ''), ok === job.total ? 'ok' : 'err');
+        toast(t('batchFinish', { ok, t: job.total, s: skipped ? t('skipped', { n: skipped }) : '' }), ok === job.total ? 'ok' : 'err');
         state.selected.clear();
         state.batchJob = null;
         await refresh(); // 兜底同步一次，保证与后端完全一致
@@ -71,7 +72,7 @@ export async function startBatchPoll(jobId) {
       stopBatchPoll();
       state.batchJob = null;
       state.batchBusy = false;
-      toast('批量进度查询失败: ' + e.message, 'err');
+      toast(t('batchPollFail', { m: e.message }), 'err');
     }
   };
   await poll();

@@ -2,6 +2,7 @@
 import { reactive, ref } from 'vue'
 import { state, toast, refresh, startBatchPoll } from '../store.js'
 import { api } from '../api.js'
+import { t } from '../i18n.js'
 import FormatDialog from './FormatDialog.vue'
 
 const skipFilled = ref(true)
@@ -9,10 +10,10 @@ const fmtOpen = ref(false)
 const idBusy = ref(false)
 const idResult = ref(null)
 
-// 简繁转换
-const scriptTo = ref('trad')
+// 简繁转换（默认繁体 → 简体，常见于整理港台唱片）
+const scriptTo = ref('simp')
 
-function needsSel() { if (state.selected.size === 0) { toast('请先在左侧列表勾选曲目', 'err'); return false; } return true; }
+function needsSel() { if (state.selected.size === 0) { toast(t('selFirst'), 'err'); return false; } return true; }
 
 async function fixEnc() {
   if (!needsSel()) return;
@@ -21,10 +22,10 @@ async function fixEnc() {
       method: 'POST', body: JSON.stringify({ ids: [...state.selected] })
     });
     const n = (r.results || []).reduce((a, x) => a + Object.keys(x.changed || {}).length, 0);
-    toast('乱码修复完成：' + n + ' 个字段已修复', 'ok');
+    toast(t('fixMojiDone', { n }), 'ok');
     clearSel();
     await refresh();
-  } catch (e) { toast('乱码修复失败: ' + e.message, 'err'); }
+  } catch (e) { toast(t('fixMojiFail', { m: e.message }), 'err'); }
 }
 
 async function convertScript() {
@@ -34,10 +35,10 @@ async function convertScript() {
       method: 'POST', body: JSON.stringify({ ids: [...state.selected], to: scriptTo.value })
     });
     const n = (r.results || []).reduce((a, x) => a + x.changed, 0);
-    toast('简繁转换完成：' + n + ' 个字段已转换', 'ok');
+    toast(t('scriptDone', { n }), 'ok');
     clearSel();
     await refresh();
-  } catch (e) { toast('简繁转换失败: ' + e.message, 'err'); }
+  } catch (e) { toast(t('scriptFail', { m: e.message }), 'err'); }
 }
 
 async function setChorus() {
@@ -47,16 +48,16 @@ async function setChorus() {
       method: 'POST', body: JSON.stringify({ ids: [...state.selected] })
     });
     const n = (r.results || []).filter(x => x.changed).length;
-    toast('合唱转换完成：' + n + '/' + r.total + ' 首（艺术家>3 位才改）', n ? 'ok' : 'err');
+    toast(t('chorusDone', { n, t: r.total }), n ? 'ok' : 'err');
     clearSel();
     await refresh();
-  } catch (e) { toast('操作失败: ' + e.message, 'err'); }
+  } catch (e) { toast(t('delFail', { m: e.message }), 'err'); }
 }
 
 // 音频内容识别：无标签/无文件名信息的曲目（track01.mp3 这类），按音频指纹
 // 与库内已标注曲目匹配，命中后写入标签并抓取歌词
 async function identify() {
-  if (state.selected.size === 0) { toast('请先勾选要识别的曲目（可在列表筛选「待识别」）', 'err'); return; }
+  if (state.selected.size === 0) { toast(t('identifySelFirst'), 'err'); return; }
   idBusy.value = true;
   idResult.value = null;
   try {
@@ -66,10 +67,10 @@ async function identify() {
     const rs = r.results || [];
     const matched = rs.filter(x => x.ok).length;
     idResult.value = { matched, total: rs.length };
-    toast('音频识别完成：' + matched + '/' + rs.length + ' 首已识别', matched ? 'ok' : 'err');
+    toast(t('identifyDone', { ok: matched, t: rs.length }), matched ? 'ok' : 'err');
     clearSel();
     await refresh();
-  } catch (e) { toast('音频识别失败: ' + e.message, 'err'); }
+  } catch (e) { toast(t('identifyFail', { m: e.message }), 'err'); }
   finally { idBusy.value = false; }
 }
 
@@ -89,9 +90,9 @@ function selectedFieldNames() {
 }
 
 async function startBatch() {
-  if (state.selected.size === 0) { toast('请先在列表勾选曲目', 'err'); return; }
+  if (state.selected.size === 0) { toast(t('selFirst'), 'err'); return; }
   const names = selectedFieldNames();
-  if (names.length === 0) { toast('请至少勾选一个要补全的字段', 'err'); return; }
+  if (names.length === 0) { toast(t('batchNoField'), 'err'); return; }
   state.batchBusy = true;
   state.batchJob = null;
   try {
@@ -105,46 +106,46 @@ async function startBatch() {
     // 全局轮询：后台运行、任意页面可见进度，并增量合并列表（不整表刷新）
     startBatchPoll(r.jobId);
   } catch (e) {
-    toast('批量刮削启动失败: ' + e.message, 'err');
+    toast(t('batchStartFail', { m: e.message }), 'err');
     state.batchBusy = false;
   }
 }
 </script>
 
 <template>
-  <div class="muted" style="margin-bottom:10px">勾选左侧列表中的曲目（也可全选），自动从所选源补全下方勾选的字段；已含该标签的曲目自动跳过，节省硬件开销。</div>
+  <div class="muted" style="margin-bottom:10px">{{ t('batchHint') }}</div>
 
   <div class="panel" style="margin-top:0">
     <div class="field-grid">
-      <label class="chk"><input type="checkbox" class="tchk" v-model="fields.cover" /> 海报</label>
-      <label class="chk"><input type="checkbox" class="tchk" v-model="fields.title" /> 歌名</label>
-      <label class="chk"><input type="checkbox" class="tchk" v-model="fields.artist" /> 艺术家</label>
-      <label class="chk"><input type="checkbox" class="tchk" v-model="fields.albumArtist" /> 专辑艺术家</label>
-      <label class="chk"><input type="checkbox" class="tchk" v-model="fields.genre" /> 流派</label>
-      <label class="chk"><input type="checkbox" class="tchk" v-model="fields.year" /> 年代</label>
-      <label class="chk"><input type="checkbox" class="tchk" v-model="fields.trackNumber" /> 曲目号</label>
-      <label class="chk"><input type="checkbox" class="tchk" v-model="fields.lyrics" /> 歌词</label>
+      <label class="chk"><input type="checkbox" class="tchk" v-model="fields.cover" /> {{ t('bCover') }}</label>
+      <label class="chk"><input type="checkbox" class="tchk" v-model="fields.title" /> {{ t('bTitle') }}</label>
+      <label class="chk"><input type="checkbox" class="tchk" v-model="fields.artist" /> {{ t('bArtist') }}</label>
+      <label class="chk"><input type="checkbox" class="tchk" v-model="fields.albumArtist" /> {{ t('bAlbumArtist') }}</label>
+      <label class="chk"><input type="checkbox" class="tchk" v-model="fields.genre" /> {{ t('bGenre') }}</label>
+      <label class="chk"><input type="checkbox" class="tchk" v-model="fields.year" /> {{ t('bYear') }}</label>
+      <label class="chk"><input type="checkbox" class="tchk" v-model="fields.trackNumber" /> {{ t('bTrack') }}</label>
+      <label class="chk"><input type="checkbox" class="tchk" v-model="fields.lyrics" /> {{ t('bLyrics') }}</label>
     </div>
     <label class="chk" style="margin-top:8px">
       <input type="checkbox" class="tchk" v-model="skipFilled" />
-      智能跳过：已有对应标签的曲目不再重复刮削
+      {{ t('smartSkip') }}
     </label>
   </div>
 
   <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-    <button class="ghost sm" @click="clearSel">清空选择</button>
+    <button class="ghost sm" @click="clearSel">{{ t('clearSel') }}</button>
     <select v-model="state.bSource" style="padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text)">
       <option v-for="s in state.sources" :key="s.name" :value="s.name">{{ s.label }}</option>
     </select>
-    <button :disabled="state.batchBusy" @click="startBatch">批量补全 ({{ state.selected.size }})</button>
+    <button :disabled="state.batchBusy" @click="startBatch">{{ t('batchRun', { n: state.selected.size }) }}</button>
   </div>
 
   <div v-if="state.batchJob" style="margin-top:12px">
     <div class="progbar"><div class="progfill" :style="{ width: (state.batchJob.total ? Math.round(state.batchJob.done / state.batchJob.total * 100) : 0) + '%' }"></div></div>
     <div class="muted">
       {{ state.batchJob.status === 'done'
-        ? ('完成：' + state.batchJob.results.filter(r => r.ok).length + '/' + state.batchJob.total + ' 成功')
-        : ('进度 ' + state.batchJob.done + '/' + state.batchJob.total + ' · ' + (state.batchJob.current || '处理中…')) }}
+        ? t('batchDone', { ok: state.batchJob.results.filter(r => r.ok).length, t: state.batchJob.total })
+        : t('batchProgressBar', { d: state.batchJob.done, t: state.batchJob.total, c: state.batchJob.current || t('processing') }) }}
     </div>
     <div v-if="state.batchJob.status === 'done' && state.batchJob.results.some(r => !r.ok && r.message)" class="err" style="white-space:pre-wrap">
       <div v-for="(r, i) in state.batchJob.results.filter(x => !x.ok && x.message)" :key="i">{{ r.fileName }}: {{ r.message }}</div>
@@ -152,47 +153,47 @@ async function startBatch() {
   </div>
 
   <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
-    <div class="h3">🔊 音频内容识别</div>
+    <div class="h3">{{ t('identify') }}</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:6px">
-      <button class="ghost sm" :disabled="idBusy" @click="identify">{{ idBusy ? '识别中…' : '识别勾选的 ' + state.selected.size + ' 首' }}</button>
-      <span class="muted">无标签、无文件名信息的曲目（如 track01.mp3），按音频内容与库内已标注曲目匹配，命中即补全标签与歌词</span>
+      <button class="ghost sm" :disabled="idBusy" @click="identify">{{ idBusy ? t('identifying') : t('identifyRun', { n: state.selected.size }) }}</button>
+      <span class="muted">{{ t('identifyHint') }}</span>
     </div>
-    <div v-if="idResult" class="muted" style="margin-top:6px">已识别 {{ idResult.matched }} / {{ idResult.total }} 首（识别成功即写入标签）</div>
+    <div v-if="idResult" class="muted" style="margin-top:6px">{{ t('identified', { ok: idResult.matched, t: idResult.total }) }}</div>
   </div>
 
   <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
-    <div class="h3">🔁 格式转换（ffmpeg 转码）</div>
+    <div class="h3">{{ t('fmtConvert') }}</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:6px">
-      <button class="ghost sm" @click="fmtOpen = true">格式转换…</button>
-      <span class="muted">批量转换音频格式、比特率和采样率，保存在同目录，不会删除源文件</span>
+      <button class="ghost sm" @click="fmtOpen = true">{{ t('fmtRun') }}</button>
+      <span class="muted">{{ t('fmtHint') }}</span>
     </div>
   </div>
   <FormatDialog :open="fmtOpen" @close="fmtOpen = false" />
 
   <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
-    <div class="h3">🧹 乱码修复</div>
+    <div class="h3">{{ t('fixMoji') }}</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:6px">
-      <button class="ghost sm" @click="fixEnc">修复勾选 {{ state.selected.size }} 首的乱码标签</button>
-      <span class="muted">自动识别并还原 GBK/UTF-8 错读的中文标题、艺术家等字段</span>
+      <button class="ghost sm" @click="fixEnc">{{ t('fixMojiRun', { n: state.selected.size }) }}</button>
+      <span class="muted">{{ t('fixMojiHint') }}</span>
     </div>
   </div>
 
   <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
-    <div class="h3">🎤 艺术家处理</div>
+    <div class="h3">{{ t('chorus') }}</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:6px">
-      <button class="ghost sm" @click="setChorus">艺术家>3 位 → 改为“合唱”</button>
-      <span class="muted">按 / ; 、 ， _ 拆分艺术家，超过 3 位时统一改为“合唱”</span>
+      <button class="ghost sm" @click="setChorus">{{ t('chorusRun') }}</button>
+      <span class="muted">{{ t('chorusHint') }}</span>
     </div>
   </div>
 
   <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
-    <div class="h3">🈶 简繁体转换</div>
+    <div class="h3">{{ t('scriptConv') }}</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:6px">
       <select v-model="scriptTo" style="padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text)">
-        <option value="trad">简体 → 繁体</option>
-        <option value="simp">繁体 → 简体</option>
+        <option value="trad">{{ t('scriptToTrad') }}</option>
+        <option value="simp">{{ t('scriptToSimp') }}</option>
       </select>
-      <button class="ghost sm" @click="convertScript">转换勾选的 {{ state.selected.size }} 首</button>
+      <button class="ghost sm" @click="convertScript">{{ t('scriptRun', { n: state.selected.size }) }}</button>
     </div>
   </div>
 </template>

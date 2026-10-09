@@ -2,6 +2,7 @@
 import { reactive, watch } from 'vue'
 import { state, toast, loadDups, refresh } from '../store.js'
 import { api } from '../api.js'
+import { t } from '../i18n.js'
 
 function track(id) { return state.tracks.find(x => x.id === id); }
 function fileName(id) { const t = track(id); return t ? t.fileName : id; }
@@ -14,9 +15,9 @@ function fileInfo(id) {
 }
 
 const methodMeta = {
-  hash: { cls: 'hash', label: 'SHA256（内容相同）' },
-  format: { cls: 'src', label: '格式（同名多格式）' },
-  tags: { cls: 'src', label: '艺术家+标题（同歌不同名）' }
+  hash: { cls: 'hash', label: () => t('dupHash') },
+  format: { cls: 'src', label: () => t('dupFormat') },
+  tags: { cls: 'src', label: () => t('dupTags') }
 };
 function meta(g) { return methodMeta[g.method] || methodMeta.hash; }
 
@@ -39,39 +40,39 @@ function clearGroup(gi, g) { checks[gi].clear(); }
 
 async function delChecked(gi, g) {
   const del = selIds(gi, g);
-  if (!del.length) { toast('请先勾选要删除的项', 'err'); return; }
-  const sure = confirm('将删除 ' + del.length + ' 个文件（勾选外的保留）：\n' + del.map(fileName).join('\n') + '\n\n确定删除吗？此操作不可撤销。');
+  if (!del.length) { toast(t('dupSelFirst'), 'err'); return; }
+  const sure = confirm(t('dupDelConfirm', { n: del.length }) + '：\n' + del.map(fileName).join('\n') + '\n\n' + t('confirm') + '？' + t('dupIrreversible'));
   if (!sure) return;
   try {
     const r = await api('/api/duplicates/remove', { method: 'POST', body: JSON.stringify({ ids: del }) });
-    toast('已删除 ' + r.removed + ' 个文件' + (r.failed.length ? '，失败 ' + r.failed.length + ' 个' : ''), r.failed.length ? 'err' : 'ok');
+    toast(t('dupDelDone', { n: r.removed }) + (r.failed.length ? t('dupDelFail2', { f: r.failed.length }) : ''), r.failed.length ? 'err' : 'ok');
     await refresh();
     await loadDups();
-  } catch (e) { toast('删除失败: ' + e.message, 'err'); }
+  } catch (e) { toast(t('dupDelFail', { m: e.message }), 'err'); }
 }
 </script>
 
 <template>
-  <button class="ghost sm" @click="loadDups">重新检测</button>
+  <button class="ghost sm" @click="loadDups">{{ t('dupRecheck') }}</button>
   <div class="muted" style="margin-top:8px;font-size:12px;line-height:1.7">
-    重复分组：SHA256 内容相同 / 指纹同录音 / 同名不同格式 / 艺术家+标题相同。<br />
-    先勾选要删除的项（默认不勾选，可“全选”后取消保留项），再点「删除选中」。
+    {{ t('dupHint') }}<br />
+    {{ t('dupGuide') }}
   </div>
-  <div v-if="state.dupGroups.length === 0" class="muted" style="margin-top:10px">未发现重复。</div>
+  <div v-if="state.dupGroups.length === 0" class="muted" style="margin-top:10px">{{ t('dupNone') }}</div>
   <div v-for="(g, gi) in state.dupGroups" :key="gi" class="dup">
-    <span class="tag" :class="meta(g).cls">{{ meta(g).label }}</span>
+    <span class="tag" :class="meta(g).cls">{{ meta(g).label() }}</span>
     <span class="dupcol">
-      <span class="duphead"><b>{{ g.count }}</b> 首 · {{ g.key }}</span>
+      <span class="duphead"><b>{{ g.count }}</b> {{ t('dupCount', { n: '' }) }} · {{ g.key }}</span>
       <span v-for="id in g.ids" :key="id" class="dupitem" :title="fileInfo(id)">
         <input type="checkbox" class="tchk" :checked="checks[gi] && checks[gi].has(id)" @change="tog(gi, id)" />
-        <span v-if="g.keepId === id" class="tag src">建议保留</span>
+        <span v-if="g.keepId === id" class="tag src">{{ t('dupKeep') }}</span>
         {{ fileName(id) }}
         <span class="muted" style="margin-left:auto;font-size:11px">{{ fileInfo(id) }}</span>
       </span>
       <span style="display:flex;gap:8px;margin-top:4px">
-        <button class="ghost sm" @click="checkAll(gi, g)">全选（保留最佳除外）</button>
-        <button class="ghost sm" @click="clearGroup(gi, g)">清空</button>
-        <button class="ghost sm" :disabled="!selIds(gi, g).length" @click="delChecked(gi, g)">删除选中 ({{ selIds(gi, g).length }})</button>
+        <button class="ghost sm" @click="checkAll(gi, g)">{{ t('dupKeepAll') }}</button>
+        <button class="ghost sm" @click="clearGroup(gi, g)">{{ t('clearSel') }}</button>
+        <button class="ghost sm" :disabled="!selIds(gi, g).length" @click="delChecked(gi, g)">{{ t('dupDel') }} ({{ selIds(gi, g).length }})</button>
       </span>
     </span>
   </div>

@@ -2,6 +2,7 @@
 import { reactive, ref, watch } from 'vue'
 import { state, cur, toast, refresh } from '../store.js'
 import { api } from '../api.js'
+import { t } from '../i18n.js'
 
 const f = ref({ title: '', artist: '', album: '', albumartist: '', genre: '', date: '', track: '', lyrics: '' })
 const sQuery = ref('')
@@ -60,23 +61,23 @@ async function save() {
   const body = { clear: false, tags: Object.fromEntries(Object.entries(tags).filter(([, v]) => v !== '')) };
   try {
     const r = await api('/api/tracks/' + encodeURIComponent(state.currentId) + '/tags', { method: 'POST', body: JSON.stringify(body) });
-    toast('标签已保存' + (r.renamed ? '，文件已重命名为：' + r.name : ''), 'ok');
+    toast(t('saved') + (r.renamed ? t('renamed', { name: r.name }) : ''), 'ok');
     await refresh();
     if (r.renamed) loadTrack(state.tracks.find(t => t.id === state.currentId) || cur());
-  } catch (e) { toast('保存失败: ' + e.message, 'err'); }
+  } catch (e) { toast(t('saveFail', { m: e.message }), 'err'); }
 }
 
 async function getLyrics() {
   if (!cur()) return;
   const title = f.value.title.trim(), artist = f.value.artist.trim();
-  if (!title) { toast('请先填写标题', 'err'); return; }
-  f.value.lyrics = '获取中…';
+  if (!title) { toast(t('fillTitle'), 'err'); return; }
+  f.value.lyrics = t('fetchingLyrics');
   const artists = artist ? artist.split('/').map(s => s.trim()).filter(Boolean) : [];
   try {
     const r = await api('/api/lyrics?source=auto&title=' + encodeURIComponent(title) + '&artists=' + encodeURIComponent(artists.join('||')));
     f.value.lyrics = r.lyric || '';
-    if (!r.lyric) toast('未获取到歌词', 'err');
-  } catch (e) { f.value.lyrics = ''; toast('获取歌词失败: ' + e.message, 'err'); }
+    if (!r.lyric) toast(t('noLyric'), 'err');
+  } catch (e) { f.value.lyrics = ''; toast(t('lyricFail', { m: e.message }), 'err'); }
 }
 function clearLyrics() { f.value.lyrics = ''; }
 
@@ -97,28 +98,28 @@ async function importLrc() {
   try {
     const r = await api('/api/tracks/' + encodeURIComponent(state.currentId) + '/lrcfile');
     f.value.lyrics = r.content || '';
-    toast('已导入外挂歌词：' + r.name, 'ok');
-  } catch (e) { toast('读取外挂歌词失败: ' + e.message, 'err'); }
+    toast(t('lrcImported', { name: r.name }), 'ok');
+  } catch (e) { toast(t('lrcFail', { m: e.message }), 'err'); }
 }
 
 async function clearCover() {
   if (!cur()) return;
   try {
     await api('/api/tracks/' + encodeURIComponent(state.currentId) + '/cover', { method: 'POST', body: JSON.stringify({ clear: true }) });
-    toast('封面已清除', 'ok');
+    toast(t('coverCleared'), 'ok');
     await refresh();
-  } catch (e) { toast('失败: ' + e.message, 'err'); }
+  } catch (e) { toast(t('coverFail', { m: e.message }), 'err'); }
 }
 
 async function mbSearch() {
   const q = sQuery.value.trim();
-  if (!q) { toast('请输入搜索关键词', 'err'); return; }
+  if (!q) { toast(t('enterKeyword'), 'err'); return; }
   searching.value = true;
   state.mbRes = [];
   try {
     const res = await api('/api/scrape/search?q=' + encodeURIComponent(q) + '&source=' + encodeURIComponent(sSource.value) + '&limit=8');
     state.mbRes = res || [];
-  } catch (e) { toast('搜索失败: ' + e.message, 'err'); }
+  } catch (e) { toast(t('searchFail', { m: e.message }), 'err'); }
   searching.value = false;
 }
 
@@ -135,72 +136,71 @@ async function apply(i, withCover) {
   };
   try {
     await api('/api/tracks/' + encodeURIComponent(state.currentId) + '/scrape', { method: 'POST', body: JSON.stringify(body) });
-    toast('刮削完成', 'ok');
+    toast(t('scraped'), 'ok');
     await refresh();
-  } catch (e) { toast('刮削失败: ' + e.message, 'err'); }
+  } catch (e) { toast(t('scrapeFail', { m: e.message }), 'err'); }
 }
 
 function srcLabel(name) { return (state.sources.find(s => s.name === name) || { label: name }).label; }
-const t = cur;
 </script>
 
 <template>
-  <div v-if="t()" class="form">
+  <div v-if="cur()" class="form">
     <div class="row" style="margin-bottom:10px">
-      <img class="cover-lg" :src="`/api/tracks/${encodeURIComponent(t().id)}/cover`" onerror="this.style.visibility='hidden'" />
+      <img class="cover-lg" :src="`/api/tracks/${encodeURIComponent(cur().id)}/cover`" onerror="this.style.visibility='hidden'" />
       <div>
-        <div style="font-weight:600">{{ t().tags.TITLE || t().fileName }}</div>
-        <div class="muted" style="font-size:13px">{{ t().path }}</div>
+        <div style="font-weight:600">{{ cur().tags.TITLE || cur().fileName }}</div>
+        <div class="muted" style="font-size:13px">{{ cur().path }}</div>
         <div class="muted" style="font-size:12px">
-          {{ fmtSize(t().size) }} · {{ fmtDur(t().duration) }} · {{ t().bitrate || '?' }} kbps · {{ t().sampleRate ? (t().sampleRate / 1000).toFixed(1) + ' kHz' : '' }} · SHA256: {{ t().sha256 ? t().sha256.slice(0, 20) + '…' : '—（打开去重页后自动计算）' }}
+          {{ fmtSize(cur().size) }} · {{ fmtDur(cur().duration) }} · {{ cur().bitrate || '?' }} kbps · {{ cur().sampleRate ? (cur().sampleRate / 1000).toFixed(1) + ' kHz' : '' }} · SHA256: {{ cur().sha256 ? cur().sha256.slice(0, 20) + '…' : '—' }}
         </div>
       </div>
     </div>
-    <label>标题 TITLE</label><input type="text" v-model="f.title" />
-    <label>艺术家 ARTIST</label><input type="text" v-model="f.artist" />
-    <label>专辑 ALBUM</label><input type="text" v-model="f.album" />
-    <label>专辑艺术家 ALBUMARTIST</label><input type="text" v-model="f.albumartist" />
-    <label>流派 GENRE</label><input type="text" v-model="f.genre" />
-    <label>年份 DATE</label><input type="text" v-model="f.date" />
-    <label>曲目号 TRACKNUMBER</label><input type="text" v-model="f.track" />
+    <label>{{ t('fTitle') }}</label><input type="text" v-model="f.title" />
+    <label>{{ t('fArtist') }}</label><input type="text" v-model="f.artist" />
+    <label>{{ t('fAlbum') }}</label><input type="text" v-model="f.album" />
+    <label>{{ t('fAlbumArtist') }}</label><input type="text" v-model="f.albumartist" />
+    <label>{{ t('fGenre') }}</label><input type="text" v-model="f.genre" />
+    <label>{{ t('fDate') }}</label><input type="text" v-model="f.date" />
+    <label>{{ t('fTrack') }}</label><input type="text" v-model="f.track" />
 
     <div style="display:flex;align-items:center;justify-content:space-between;margin-top:14px">
-      <label style="margin:0">歌词 LYRICS</label>
+      <label style="margin:0">{{ t('fLyrics') }}</label>
       <div class="row" style="gap:6px">
-        <button v-if="t().hasLrcFile" class="ghost sm" @click="importLrc" title="读取同目录 .lrc 文件内容">导入外挂 LRC</button>
-        <button class="ghost sm" @click="getLyrics">获取歌词</button>
-        <button class="ghost sm" @click="clearLyrics">清除歌词</button>
+        <button v-if="cur().hasLrcFile" class="ghost sm" @click="importLrc" :title="t('lrcTitle')">{{ t('importLrc') }}</button>
+        <button class="ghost sm" @click="getLyrics">{{ t('getLyrics') }}</button>
+        <button class="ghost sm" @click="clearLyrics">{{ t('clearLyrics') }}</button>
       </div>
     </div>
     <textarea rows="8" v-model="f.lyrics"></textarea>
 
     <div class="row" style="margin-top:12px">
-      <button class="sm" @click="save">保存标签</button>
-      <button class="ghost sm" @click="clearCover">清除封面</button>
+      <button class="sm" @click="save">{{ t('saveTags') }}</button>
+      <button class="ghost sm" @click="clearCover">{{ t('clearCover') }}</button>
     </div>
 
-    <label style="margin-top:14px">🔍 刮削搜索（选择来源）</label>
+    <label style="margin-top:14px">{{ t('searchScrape') }}</label>
     <div class="row">
       <select v-model="sSource" style="padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);min-width:120px">
         <option v-for="s in state.sources" :key="s.name" :value="s.name">{{ s.label }}</option>
       </select>
-      <input type="text" v-model="sQuery" placeholder="自动按标题+艺术家检索，可覆盖" @keydown.enter="mbSearch" />
-      <button class="sm" @click="mbSearch">搜索</button>
+      <input type="text" v-model="sQuery" :placeholder="t('searchPlaceholder')" @keydown.enter="mbSearch" />
+      <button class="sm" @click="mbSearch">{{ t('search') }}</button>
     </div>
 
-    <div v-if="searching" class="loading" style="margin-top:8px">搜索…</div>
-    <div v-else-if="state.mbRes.length === 0" class="muted" style="margin-top:8px">尚无搜索结果</div>
+    <div v-if="searching" class="loading" style="margin-top:8px">{{ t('searching') }}</div>
+    <div v-else-if="state.mbRes.length === 0" class="muted" style="margin-top:8px">{{ t('noResults') }}</div>
     <div v-else>
-      <label style="margin:10px 0 4px">应用字段（可选）</label>
+      <label style="margin:10px 0 4px">{{ t('applyFields') }}</label>
       <div class="field-grid">
-        <label class="chk"><input type="checkbox" class="tchk" v-model="sf.title" /> 歌名</label>
-        <label class="chk"><input type="checkbox" class="tchk" v-model="sf.artist" /> 艺术家</label>
-        <label class="chk"><input type="checkbox" class="tchk" v-model="sf.albumArtist" /> 专辑艺术家</label>
-        <label class="chk"><input type="checkbox" class="tchk" v-model="sf.genre" /> 流派</label>
-        <label class="chk"><input type="checkbox" class="tchk" v-model="sf.year" /> 年代</label>
-        <label class="chk"><input type="checkbox" class="tchk" v-model="sf.trackNumber" /> 曲目号</label>
-        <label class="chk"><input type="checkbox" class="tchk" v-model="sf.lyrics" /> 歌词</label>
-        <label class="chk"><input type="checkbox" class="tchk" v-model="sfCover" /> 海报</label>
+        <label class="chk"><input type="checkbox" class="tchk" v-model="sf.title" /> {{ t('bTitle') }}</label>
+        <label class="chk"><input type="checkbox" class="tchk" v-model="sf.artist" /> {{ t('bArtist') }}</label>
+        <label class="chk"><input type="checkbox" class="tchk" v-model="sf.albumArtist" /> {{ t('bAlbumArtist') }}</label>
+        <label class="chk"><input type="checkbox" class="tchk" v-model="sf.genre" /> {{ t('bGenre') }}</label>
+        <label class="chk"><input type="checkbox" class="tchk" v-model="sf.year" /> {{ t('bYear') }}</label>
+        <label class="chk"><input type="checkbox" class="tchk" v-model="sf.trackNumber" /> {{ t('bTrack') }}</label>
+        <label class="chk"><input type="checkbox" class="tchk" v-model="sf.lyrics" /> {{ t('bLyrics') }}</label>
+        <label class="chk"><input type="checkbox" class="tchk" v-model="sfCover" /> {{ t('bCover') }}</label>
       </div>
     </div>
     <div v-for="(r, i) in state.mbRes" :key="i" class="res-item">
@@ -208,14 +208,14 @@ const t = cur;
         <img v-if="r.coverURL" class="thumb" :src="r.coverURL" onerror="this.style.visibility='hidden'" />
         <div style="flex:1;min-width:0">
           <div class="t"><span class="tag src">{{ srcLabel(r.source) }}</span> {{ r.title }} <span class="muted">{{ r.artists ? r.artists.join(', ') : '' }}</span></div>
-          <div class="m">{{ r.album }} <span class="muted">({{ r.date || '未知年份' }})</span></div>
+          <div class="m">{{ r.album }} <span class="muted">({{ r.date || t('unknown') }})</span></div>
           <div class="acts">
-            <button class="sm" @click="apply(i, true)">应用(含封面)</button>
-            <button class="ghost sm" @click="apply(i, false)">仅标签</button>
+            <button class="sm" @click="apply(i, true)">{{ t('applyWithCover') }}</button>
+            <button class="ghost sm" @click="apply(i, false)">{{ t('applyTagsOnly') }}</button>
           </div>
         </div>
       </div>
     </div>
   </div>
-  <div v-else class="muted">在左侧列表点击某一行曲目，在此编辑标签、获取歌词或刮削。</div>
+  <div v-else class="muted">{{ t('selectTrackHint') }}</div>
 </template>

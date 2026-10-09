@@ -25,6 +25,15 @@ type Client struct {
 	HTTP *http.Client
 	// AcoustIDAPIKey, when non-empty, enables AcoustID recording lookup.
 	AcoustIDAPIKey string
+	// LastFMKey enables Last.fm track search.
+	LastFMKey string
+	// DiscogsToken enables Discogs database search.
+	DiscogsToken string
+	// JamendoClientID enables Jamendo track search.
+	JamendoClientID string
+	// SpotifyID/SpotifySecret enable Spotify search (client credentials).
+	SpotifyID     string
+	SpotifySecret string
 }
 
 func NewClient() *Client {
@@ -178,6 +187,81 @@ func (c *Client) ReleaseDetail(mbid string) (*ReleaseDetail, error) {
 		}
 	}
 	return rd, nil
+}
+
+// LookupByFingerprint identifies a recording from a Chromaprint fingerprint
+// via the AcoustID API (requires AcoustIDAPIKey). Returns the best matching
+// recording; error when the key is missing or nothing matches.
+func (c *Client) LookupByFingerprint(fp string, durationSec int) (RecordingResult, error) {
+	if c.AcoustIDAPIKey == "" {
+		return RecordingResult{}, fmt.Errorf("AcoustID API Key 未设置（设置页填写）")
+	}
+	u := fmt.Sprintf("https://api.acoustid.org/v2/lookup?client=%s&fingerprint=%s&meta=recordings&format=json",
+		url.QueryEscape(c.AcoustIDAPIKey), url.QueryEscape(fp))
+	if durationSec > 0 {
+		u += fmt.Sprintf("&duration=%d", durationSec)
+	}
+	body, err := c.get(u)
+	if err != nil {
+		return RecordingResult{}, err
+	}
+	var resp struct {
+		Status  string `json:"status"`
+		Error   struct {
+			Message string `json:"message"`
+		} `json:"error"`
+		Results []struct {
+			Score      float64 `json:"score"`
+			Recordings []struct {
+				ID       string `json:"id"`
+				Title    string `json:"title"`
+				Duration int    `json:"duration"`
+				Artists  []struct {
+					Name string `json:"name"`
+				} `json:"artists"`
+				ReleaseGroups []struct {
+					FirstReleaseDate string `json:"first-release-date"`
+					Title           string `json:"title"`
+				} `json:"releasegroups"`
+			} `json:"recordings"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return RecordingResult{}, fmt.Errorf("parse acoustid response: %w", err)
+	}
+	if resp.Status != "ok" {
+		msg := resp.Error.Message
+		if msg == "" {
+			msg = resp.Status
+		}
+		return RecordingResult{}, fmt.Errorf("acoustid: %s", msg)
+	}
+	best := RecordingResult{}
+	for _, r := range resp.Results { // AcoustID 结果按分数降序
+		for _, rec := range r.Recordings {
+			if rec.Title == "" || len(rec.Artists) == 0 {
+				continue
+			}
+			if best.MBID == "" { // 取第一个有效匹配（分数最高）
+				best = RecordingResult{MBID: rec.ID, Title: rec.Title, Duration: rec.Duration}
+				for _, a := range rec.Artists {
+					if a.Name != "" {
+						best.Artists = append(best.Artists, a.Name)
+					}
+				}
+				for _, rg := range rec.ReleaseGroups {
+					best.Releases = append(best.Releases, Release{MBID: "", Title: rg.Title, Date: rg.FirstReleaseDate})
+				}
+				if len(best.Releases) > 0 {
+					best.FirstDate = best.Releases[0].Date
+				}
+			}
+		}
+	}
+	if best.MBID == "" {
+		return RecordingResult{}, fmt.Errorf("音频指纹未匹配到录音（AcoustID 无结果）")
+	}
+	return best, nil
 }
 
 // FetchCover retrieves the front cover for a release as bytes. Returns
