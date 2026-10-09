@@ -31,22 +31,41 @@ export function go(p) { location.hash = p }
 
 export function cur() { return state.tracks.find(t => t.id === state.currentId) || null }
 
-// 新版本：登录成功/页面加载时调用（仅刷新顶栏徽标，不弹窗）；
-// 手动“检查更新”（force=true）才弹出更新提醒弹窗。
+// 新版本检查（三态：有新版 / 已是最新 / 查询失败）。
+// - force=true（手动“检查更新”）：调 /api/version/check 强制后端实时重查；
+//   有新版弹更新窗；已是最新 toast 提示；查询失败 toast 提示失败原因。
+// - force=false（自动：登录成功/刷新恢复会话）：调 /api/version 读缓存；
+//   有新版弹更新窗（同一版本号每个会话只提醒一次，避免反复打扰）；
+//   已是最新或查询失败均静默。
 export const verState = { ver: null, showUpdate: false }
 
 export async function checkVersion(force = false) {
+  const url = force ? '/api/version/check' : '/api/version';
   try {
-    const v = await api('/api/version');
+    const v = await api(url);
     state.version = v.current || '';
-    if (v.latest && v.latest !== v.current) {
+    const newer = !!(v.latest && v.status === 'ok' && v.latest !== v.current);
+    if (newer) {
       verState.ver = v;
-      if (force) verState.showUpdate = true;
+      // 自动检查：同一版本号每个会话只弹一次，避免刷新反复打扰；
+      // 手动检查（force）每次有新版都弹。
+      const key = 'lnh-upd-notified-' + v.latest;
+      if (force || !sessionStorage.getItem(key)) {
+        verState.showUpdate = true;
+        sessionStorage.setItem(key, '1');
+      }
     } else {
       verState.ver = null;
-      if (force) toast(t('upToDate'));
+      if (force) {
+        if (v.status === 'fail') toast(t('checkUpdateFail'), 'err');
+        else if (v.latest && v.latest === v.current) toast(t('upToDate'));
+        else toast(t('checkUpdateFail'));
+      }
     }
-  } catch (e) { /* 无网络/后端不支持时静默 */ }
+  } catch (e) {
+    verState.ver = null;
+    if (force) toast(t('checkUpdateFail') + ' (' + (e.message || '') + ')', 'err');
+  }
 }
 
 export function toast(msg, type = '') {

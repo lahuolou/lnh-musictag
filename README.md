@@ -110,6 +110,13 @@ docker run -d --name lnh-musictag --restart unless-stopped \
 - **Admin area**: everything after login — music library list / edit / batch / dedup / settings / plugins, all behind the gear menu and top bar.
 - Key-based scrape sources start **off** by default; the Plugins page shows a 🔑 badge and points to Settings → Database config to fill in the key.
 
+### Update check
+
+- **How it works**: compares the built-in version (`AppVersion` in `main.go`) with the latest release version (`VERSION` file, updated on every release).
+- **Sources** (first success wins): GitHub Releases API → jsDelivr CDN (`VERSION`) → raw.githubusercontent (`VERSION`). Falls back to CDN when the GitHub API is unreachable from mainland China.
+- **Three outcomes**: newer version → popup reminder (auto check once after login; manual check always re-queries); up to date → toast "You are up to date"; check failed → toast "Update check failed" (no longer falsely reports "up to date").
+- Manual "Check for updates" (gear menu) forces a real-time re-query; auto check (login/refresh) reads a 30-minute cached snapshot.
+
 ### API overview
 
 | Method | Path | Purpose |
@@ -245,6 +252,13 @@ docker run -d --name lnh-musictag --restart unless-stopped \
 - **公开首页**（`/`）：品牌 + 搜索框（占位，暂未接入功能）+ 功能亮点 + 登录入口，无需登录。
 - **后台区**：登录后全部管理功能——音乐列表 / 编辑 / 批量 / 去重 / 设置 / 插件，经顶部栏与齿轮菜单进入。
 - 需 API Key 的刮削源默认关闭；插件页显示 🔑 徽标并引导去「设置 → 数据库配置」填写 Key。
+
+### 更新检查
+
+- **更新依据**：对比内置版本号（`main.go` 的 `AppVersion`）与仓库最新 Release 版本号（`VERSION` 文件，随每次发布更新）。
+- **查询源**（任一成功即用）：GitHub Releases API → jsDelivr CDN（`VERSION` 文件）→ raw.githubusercontent（`VERSION` 文件）。大陆网络下 GitHub API 常不通，自动走 CDN 源。
+- **三态结果**：有新版 → 弹窗提醒（登录后自动检查一次，手动检查每次都查）；已是最新 → 提示"当前已是最新版本"；查询失败 → 提示"检查更新失败"（不再误报"已是最新"）。
+- 手动「检查更新」（齿轮菜单）会强制实时重查；自动检查（登录/刷新）读 30 分钟缓存快照。
 
 ### API 一览
 
