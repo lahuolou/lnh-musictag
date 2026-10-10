@@ -7,6 +7,7 @@ import FormatDialog from './FormatDialog.vue'
 
 const skipFilled = ref(true)
 const fmtOpen = ref(false)
+const starting = ref(false) // 工具任务“启动中”防连点：点击立即禁用并显示启动中，避免点了没反应
 
 // 简繁转换（默认繁体 → 简体，常见于整理港台唱片）
 const scriptTo = ref('simp')
@@ -19,9 +20,12 @@ const failKeys = { identify: 'identifyFail', fixEnc: 'fixMojiFail', script: 'scr
 
 async function runToolJob(kind, url, body) {
   if (!needsSel()) return;
+  if (starting.value) return; // 已有任务启动中，忽略连点
+  starting.value = true;
   stopToolJob();
   try {
     const r = await api(url, { method: 'POST', body: JSON.stringify(body) });
+    starting.value = false;
     if (!r.jobId) { // 无目标（如识别：库内无待识别曲目）
       toast(t('jobDone', { ok: 0, fail: 0, t: 0 }), 'err');
       return;
@@ -45,6 +49,7 @@ async function runToolJob(kind, url, body) {
     }, 500);
   } catch (e) {
     // 启动失败：清除可能残留的旧任务展示，避免“点了 A 却看到 B 的进度”
+    starting.value = false;
     stopToolJob();
     state.toolJob = null;
     toast(t(failKeys[kind], { m: e.message }), 'err');
@@ -168,7 +173,7 @@ async function startBatch() {
   <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
     <div class="h3">{{ t('identify') }}</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:6px">
-      <button class="ghost sm" :disabled="(state.toolJob && state.toolJob.status === 'running') || state.selected.size === 0" @click="identify">{{ state.toolJob && state.toolJob.status === 'running' ? t('identifying') : state.selected.size === 0 ? t('selBtn') : t('identifyRun', { n: state.selected.size }) }}</button>
+      <button class="ghost sm" :disabled="starting || (state.toolJob && state.toolJob.status === 'running') || state.selected.size === 0" @click="identify">{{ starting ? t('starting') : state.toolJob && state.toolJob.status === 'running' ? t('identifying') : state.selected.size === 0 ? t('selBtn') : t('identifyRun', { n: state.selected.size }) }}</button>
       <span class="muted">{{ t('identifyHint') }}</span>
     </div>
   </div>
@@ -185,7 +190,7 @@ async function startBatch() {
   <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
     <div class="h3">{{ t('fixMoji') }}</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:6px">
-      <button class="ghost sm" :disabled="state.selected.size === 0" @click="fixEnc">{{ state.selected.size === 0 ? t('selBtn') : t('fixMojiRun', { n: state.selected.size }) }}</button>
+      <button class="ghost sm" :disabled="starting || state.selected.size === 0" @click="fixEnc">{{ starting ? t('starting') : state.selected.size === 0 ? t('selBtn') : t('fixMojiRun', { n: state.selected.size }) }}</button>
       <span class="muted">{{ t('fixMojiHint') }}</span>
     </div>
   </div>
@@ -205,7 +210,7 @@ async function startBatch() {
         <option value="trad">{{ t('scriptToTrad') }}</option>
         <option value="simp">{{ t('scriptToSimp') }}</option>
       </select>
-      <button class="ghost sm" :disabled="state.selected.size === 0" @click="convertScript">{{ state.selected.size === 0 ? t('selBtn') : t('scriptRun', { n: state.selected.size }) }}</button>
+      <button class="ghost sm" :disabled="starting || state.selected.size === 0" @click="convertScript">{{ starting ? t('starting') : state.selected.size === 0 ? t('selBtn') : t('scriptRun', { n: state.selected.size }) }}</button>
     </div>
   </div>
 </template>

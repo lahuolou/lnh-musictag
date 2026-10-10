@@ -139,7 +139,7 @@ label{display:block;font-size:12px;color:var(--muted);margin:8px 0 4px}
 .page.merge{max-width:1600px}
 .split{display:flex;gap:16px;align-items:flex-start}
 .split .left{flex:1.4;min-width:0}
-.split .right{flex:1;min-width:0;position:sticky;top:60px;max-height:calc(100vh - 80px);overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+.split .right{flex:1;min-width:0;position:sticky;top:60px;max-height:calc(100vh - 80px);overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;z-index:1}
 .subtabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:12px}
 @media(max-width:1080px){
   .split{flex-direction:column}
