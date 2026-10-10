@@ -5,12 +5,14 @@ import { api } from '../api.js'
 import { t } from '../i18n.js'
 
 // 插件页：按类型分组渲染全部插件（刮削源 / 工具 / 下载·协议预留），
-// 开关即启停并持久化；FFmpeg 支持自定义路径 / 探测 / 容器内一键安装。
+// 分组默认折叠、点击标题展开；支持导入第三方插件声明并展示开发说明。
 const plugins = ref([])
 const busy = ref(false)
 const msg = ref('')
 const ffStatus = ref({ available: false, path: '', version: '' })
 const ffInstalling = ref(false)
+const importJson = ref('')
+const importing = ref(false)
 
 const groupMeta = [
   { kind: 'scrape', key: 'srcPlugins', hint: 'srcPluginsHint' },
@@ -88,6 +90,24 @@ async function installFFmpeg() {
   } finally { ffInstalling.value = false; }
 }
 
+// 导入第三方插件：粘贴插件声明 JSON（单对象 / {plugins:[...]} / 数组均可）
+async function importPlugins() {
+  const raw = importJson.value.trim();
+  if (!raw) { toast(t('importJsonEmpty'), 'err'); return; }
+  importing.value = true;
+  msg.value = '';
+  try {
+    const r = await api('/api/plugins/import', { method: 'POST', body: raw });
+    const n = (r.imported || []).length;
+    toast(t('pluginImported', { n }), 'ok');
+    importJson.value = '';
+    await loadPlugins();
+  } catch (e) {
+    toast(t('pluginImportFail', { m: e.message }), 'err');
+    msg.value = e.message;
+  } finally { importing.value = false; }
+}
+
 onMounted(() => { loadPlugins(); loadFFmpeg(); });
 </script>
 
@@ -95,8 +115,23 @@ onMounted(() => { loadPlugins(); loadFFmpeg(); });
   <div class="page-wrap">
     <h1 class="pg-title">{{ t('plugins') }}</h1>
 
-    <div class="panel" v-for="gm in groupMeta" :key="gm.kind" v-show="groups[gm.kind].length">
-      <h2>{{ t(gm.key) }}</h2>
+    <!-- 导入第三方插件 -->
+    <details class="panel">
+      <summary class="psummary">{{ t('importPlugin') }} <span class="muted small">{{ t('importPluginHint') }}</span></summary>
+      <textarea v-model="importJson" rows="6" class="import-box" :placeholder="t('importJsonPh')"></textarea>
+      <div class="row" style="margin-top:8px">
+        <button class="sm" :disabled="importing" @click="importPlugins">{{ importing ? t('importing') : t('importPluginBtn') }}</button>
+        <span class="muted small">{{ t('importPluginNote') }}</span>
+      </div>
+      <details class="devdoc">
+        <summary class="psummary small">{{ t('pluginDev') }}</summary>
+        <pre class="devpre">{{ t('pluginDevBody') }}</pre>
+        <p class="muted small">{{ t('pluginDevMore') }} <code>docs/PLUGINS.md</code></p>
+      </details>
+    </details>
+
+    <details class="panel" v-for="gm in groupMeta" :key="gm.kind" v-show="groups[gm.kind].length">
+      <summary class="psummary">{{ t(gm.key) }} <span class="muted small">（{{ groups[gm.kind].length }}）</span></summary>
       <p class="muted" style="margin:0 0 12px">{{ t(gm.hint) }}</p>
 
       <div class="plist">
@@ -106,6 +141,7 @@ onMounted(() => { loadPlugins(); loadFFmpeg(); });
               {{ p.label }}
               <small class="muted">{{ p.name }}</small>
               <em v-if="p.builtin" class="builtin">{{ t('builtin') }}</em>
+              <em v-if="!p.builtin" class="ext">ext</em>
               <em v-if="p.needsKey" class="key" :class="{ ok: p.keyConfigured }">🔑 {{ p.keyConfigured ? t('keySet') : t('keyNotSet') }}</em>
             </span>
             <label class="switch" :class="{ on: p.enabled }">
@@ -143,7 +179,7 @@ onMounted(() => { loadPlugins(); loadFFmpeg(); });
           </div>
         </div>
       </div>
-    </div>
+    </details>
 
     <div class="panel" v-if="!msg && !plugins.length" style="padding:24px;text-align:center">
       <p class="muted">{{ t('pluginsEmpty') }}</p>
@@ -157,12 +193,21 @@ onMounted(() => { loadPlugins(); loadFFmpeg(); });
 
 <style scoped>
 .pg-title { margin: 0 0 14px; font-size: 20px; }
+details.panel { padding: 0 14px; margin-bottom: 10px; }
+.psummary { cursor: pointer; font-weight: 600; font-size: 15px; padding: 12px 0; user-select: none; }
+.psummary.small { font-size: 13px; font-weight: 500; }
+details.panel > *:not(summary) { margin-top: 2px; }
+.small { font-size: 12px; }
+.import-box { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--line, rgba(128,128,128,.3)); background: var(--bg2, rgba(128,128,128,.08)); color: inherit; font-family: ui-monospace, Consolas, monospace; font-size: 12px; box-sizing: border-box; }
+.devdoc { border-top: 1px dashed var(--line, rgba(128,128,128,.25)); margin-top: 10px; }
+.devpre { white-space: pre-wrap; font-size: 12px; line-height: 1.6; background: var(--bg2, rgba(128,128,128,.08)); padding: 10px; border-radius: 8px; overflow-x: auto; color: inherit; }
 .plist { display: flex; flex-direction: column; gap: 8px; }
 .pitem { padding: 10px; border-radius: 8px; background: var(--bg2, rgba(128,128,128,.08)); }
 .prow { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .plabel { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .plabel small { opacity: .6; }
-.builtin, .key { font-style: normal; font-size: 11px; padding: 1px 6px; border-radius: 6px; background: rgba(128,128,128,.18); }
+.builtin, .key, .ext { font-style: normal; font-size: 11px; padding: 1px 6px; border-radius: 6px; background: rgba(128,128,128,.18); }
+.ext { background: rgba(61,126,230,.18); color: #3d7ee6; }
 .key { background: rgba(230,148,61,.22); color: #e6943d; }
 .key.ok { background: rgba(48,164,108,.2); color: #30a46c; }
 .key-tip { margin-top: 6px; font-size: 12px; color: #e6943d; }

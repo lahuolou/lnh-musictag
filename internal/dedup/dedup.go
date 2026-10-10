@@ -32,25 +32,70 @@ func qualityScore(t *model.Track) int {
 	return tier*100000 + int(t.Bitrate)*100 + int(t.SampleRate)
 }
 
-// GroupByArtistTitle groups tracks whose ARTIST + TITLE tags match (normalized),
-// falling back to the filename's "artist - title" pattern when a tag is empty.
-// Catches the common "same song ripped twice with different filenames" case.
+// meaningfulTitle reports whether a parsed filename title is usable for
+// dedup grouping: at least 2 chars (a bare "a" is not a song title), not a
+// bare track number (01 / track01), not a placeholder ("Unknown"/"未知").
+// Garbled filenames still participate (two identical garbled names are
+// genuinely duplicates), which is safe: different garbled titles land in
+// different groups.
+func meaningfulTitle(s string) bool {
+	s = strings.TrimSpace(s)
+	if len(s) < 2 {
+		return false
+	}
+	low := strings.ToLower(s)
+	if strings.HasPrefix(low, "track") {
+		return false
+	}
+	allDigit := true
+	for _, r := range low {
+		if r < '0' || r > '9' {
+			allDigit = false
+			break
+		}
+	}
+	if allDigit {
+		return false
+	}
+	switch low {
+	case "unknown", "unknown artist", "unknown artists", "未知", "未知艺术家", "未知歌手", "<unknown>", "n/a", "none":
+		return false
+	}
+	return true
+}
+
+// meaningfulArtist reports whether a parsed filename artist is usable:
+// at least 2 chars, non-empty and not a placeholder.
+func meaningfulArtist(s string) bool {
+	s = strings.TrimSpace(s)
+	if len(s) < 2 {
+		return false
+	}
+	switch strings.ToLower(s) {
+	case "unknown", "unknown artist", "unknown artists", "未知", "未知艺术家", "未知歌手", "<unknown>", "n/a", "none":
+		return false
+	}
+	return true
+}
+
+// GroupByArtistTitle groups tracks whose ARTIST + TITLE match (normalized).
+// The filename's "artist - title" pattern takes precedence over tags: the list
+// shows filenames, and tags can be stale/garbled/placeholder (e.g. several
+// files all tagged with the same wrong title would otherwise be grouped as
+// "duplicates" although the songs are different). Tag values are only used
+// when the filename carries no meaningful title/artist (e.g. track01.mp3).
 // The track with the best audio quality is flagged as the keeper (KeepID).
 func GroupByArtistTitle(tracks []*model.Track) []model.DuplicateGroup {
 	byKey := map[string][]*model.Track{}
 	for _, t := range tracks {
 		artist := strings.ToLower(strings.TrimSpace(t.Tags["ARTIST"]))
 		title := strings.ToLower(strings.TrimSpace(t.Tags["TITLE"]))
-		// 标签缺失/为空时，从文件名“艺术家 - 标题”解析补齐，
-		// 保证空标签的库也能正确识别同歌不同名；文件名不同则自然不同组。
-		if artist == "" || title == "" {
-			fArtist, fTitle := parseArtistTitle(t.FileName)
-			if artist == "" {
-				artist = fArtist
-			}
-			if title == "" {
-				title = fTitle
-			}
+		fArtist, fTitle := parseArtistTitle(t.FileName)
+		if meaningfulArtist(fArtist) {
+			artist = fArtist
+		}
+		if meaningfulTitle(fTitle) {
+			title = fTitle
 		}
 		if artist == "" || title == "" {
 			continue

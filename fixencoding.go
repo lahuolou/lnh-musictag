@@ -50,10 +50,10 @@ func cjkCount(s string) int {
 	return n
 }
 
-// rareHanCount 统计生僻汉字数量：不在 GBK 字符集、或 GBK 码位落在 GB2312
-// 二级区（首字节 ≥ 0xD8）的字视为生僻。GBK/UTF-8 误读产生的"误读字"大多
-// 落在二级区，而正常歌曲标题/歌手名基本用一级常用字——这是区分"正常中文"
-// 与"GBK 误读中文"最可靠的廉价信号（纯按 CJK 数量评分会把误读当正常）。
+// rareHanCount 统计生僻汉字数量：不在 GBK 字符集、或 GBK 码位不在 GB2312
+// 一级区（首字节 0xB0–0xD7）的字视为生僻。GBK/UTF-8 误读产生的"误读字"大多
+// 落在二级区/扩展区，而正常歌曲标题/歌手名基本用一级常用字——这是区分"正常中文"
+// 与"误读中文"最可靠的廉价信号（纯按 CJK 数量评分会把误读当正常）。
 var rareCache sync.Map // rune -> int（1=生僻）
 
 func rareHanCount(s string) int {
@@ -67,13 +67,37 @@ func rareHanCount(s string) int {
 			continue
 		}
 		rare := 1
-		if b, err := simplifiedchinese.GBK.NewEncoder().Bytes([]byte(string(r))); err == nil && len(b) == 2 && b[0] < 0xD8 {
+		if b, err := simplifiedchinese.GBK.NewEncoder().Bytes([]byte(string(r))); err == nil && len(b) == 2 && b[0] >= 0xB0 && b[0] <= 0xD7 {
 			rare = 0 // GB2312 一级区（常用字）
 		}
 		rareCache.Store(r, rare)
 		n += rare
 	}
 	return n
+}
+
+// rareHanSignal 生僻字信号：一段文本里 ≥3 个汉字且**超过一半**是生僻字 →
+// 极可能是编码误读（正常歌名/歌手名不会大量使用 GB2312 常用区之外的罕见字）。
+// 用于捕获"全 CJK 型误读"——它们没有可还原的编码链（信息已丢失），只能靠
+// 检测筛出、再走刮削/识别补全。
+// 注意：
+//  - ≥3 而不是 ≥2——GB2312 常用区之外还有大量"繁体常用字"（陳慧嫻/龍/鳳
+//    等），阈值过低会把正常繁体标签误判成乱码（真实库验证过）。
+//  - 严格 >50% 而不是 ≥50%——正常歌名可能恰好一半含生僻（如"陳志朋 - 红蜻蜓
+//    .flac"：紅/蜻/蜓 3 个生僻对 6 个汉字恰 50%），≥50% 会把正常曲目误标
+//    乱码；而信息丢失型乱码（"浜洪潛鋆澞"）生僻占比普遍 60% 以上。
+func rareHanSignal(s string) bool {
+	cjk, rare := 0, 0
+	for _, r := range s {
+		if !unicode.Is(unicode.Han, r) {
+			continue
+		}
+		cjk++
+		if rareHanCount(string(r)) > 0 {
+			rare++
+		}
+	}
+	return cjk >= 3 && rare >= 3 && rare*2 > cjk
 }
 
 // fixMojibake attempts to repair garbled Chinese tags caused by GBK/UTF-8
@@ -189,11 +213,31 @@ func looksGarbled(s string) bool {
 	return false
 }
 
+// garbledCache 缓存 fixMojibake 的判定结果：同一字符串反复出现（曲目标题
+// 重复、列表反复刷新）时避免重复做 GBK/UTF-8 编解码链，列表接口动态重算
+// 乱码标记时不拖慢响应。
+var garbledCache sync.Map // string -> bool
+
 // looksGarbledText 统一判定"乱码文本"：命中乱码特征标记（FFFD/注音/符号/
-// Latin-1 误读区），或 fixMojibake 能还原（GBK/UTF-8 错读但字节信息仍在）。
+// Latin-1 误读区），或大量生僻字（全 CJK 型误读，编码信息已丢失），或
+// （≥4 字时）fixMojibake 能还原（GBK/UTF-8 错读但字节信息仍在）。
 // 智能跳过、乱码筛选、文件名修复、编辑页回退共用同一套口径。
+// 注意：fix 还原只对 ≥4 字的文本启用——短串（2-3 个常用汉字，如"许嵩"）
+// 的 GBK 字节恰好构成合法 UTF-8 序列时会被误"还原"成另一个中文串
+// （"许嵩"→"璁稿旦"），真实库验证过会把正常标签误判成乱码。
 func looksGarbledText(s string) bool {
-	return looksGarbled(s) || fixMojibake(s) != s
+	if s == "" {
+		return false
+	}
+	if v, ok := garbledCache.Load(s); ok {
+		return v.(bool)
+	}
+	b := looksGarbled(s) || rareHanSignal(s)
+	if !b && utf8.RuneCountInString(s) >= 4 {
+		b = fixMojibake(s) != s
+	}
+	garbledCache.Store(s, b)
+	return b
 }
 
 // looksGarbledTags reports whether any of a track's visible text fields

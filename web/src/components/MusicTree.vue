@@ -3,11 +3,10 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { state, toast, refresh, loadSources } from '../store.js'
 import { api } from '../api.js'
 import { t } from '../i18n.js'
-
-const q = ref('')
-const filter = ref('all')
-const scanDir = ref(state.scanDir)
-const scanMsg = ref('')
+const q = ref('');
+const filter = ref('all');
+const scanDir = ref(state.scanDir);
+const scanMsg = ref('');
 let poll = null
 
 // 排序状态（默认不排序=保持扫描顺序；扫描进行中强制保持扫描顺序，暂停/完成后可点表头排序）
@@ -127,9 +126,9 @@ function onScroll(e) {
 function coverUrl(id) { return '/api/tracks/' + encodeURIComponent(id) + '/cover'; }
 function hasLyrics(t) { return !!(t.tags.LYRICS || '').trim(); }
 function hasLrc(t) { return /\[\d{1,2}:\d{2}/.test(t.tags.LYRICS || ''); }
-function lrcMark(t) {
-  const a = hasLrc(t), b = !!t.hasLrcFile;
-  return a && b ? '双' : a ? '有' : b ? '外' : '无';
+function lrcMark(it) {
+  const a = hasLrc(it), b = !!it.hasLrcFile;
+  return a && b ? t('lyrBoth') : a ? t('lyrEmbed') : b ? t('lyrLrc') : t('lyrNone');
 }
 function fmtSize(s) {
   if (!s) return '';
@@ -246,8 +245,7 @@ onBeforeUnmount(stopPoll);
             <th class="th-sort" @click="setSort('artist')">{{ t('hArtist') }} {{ sortIcon('artist') }}</th>
             <th class="th-sort" @click="setSort('album')">{{ t('hAlbum') }} {{ sortIcon('album') }}</th>
             <th class="th-sort" @click="setSort('albumartist')">{{ t('hAlbumArtist') }} {{ sortIcon('albumartist') }}</th>
-            <th style="width:52px">{{ t('hLyric') }}</th>
-            <th style="width:46px">LRC</th>
+            <th style="width:52px" :title="t('lyrTitle')">{{ t('hLyric') }}</th>
             <th class="th-sort" style="width:60px" @click="setSort('year')">{{ t('hYear') }} {{ sortIcon('year') }}</th>
             <th class="th-sort" @click="setSort('genre')">{{ t('hGenre') }} {{ sortIcon('genre') }}</th>
             <th class="th-sort" style="width:64px" @click="setSort('size')">{{ t('hSize') }} {{ sortIcon('size') }}</th>
@@ -264,14 +262,13 @@ onBeforeUnmount(stopPoll);
             <td :title="item.tags.ARTIST ? item.tags.ARTIST : nameArtist(item)">{{ displayArtist(item) }}</td>
             <td>{{ item.tags.ALBUM || '' }}</td>
             <td>{{ item.tags.ALBUMARTIST || '' }}</td>
-            <td>{{ hasLyrics(item) ? t('hasLyric') : t('none') }}</td>
-            <td :title="item.hasLrcFile ? t('lrcTitle') : ''">{{ lrcMark(item) }}</td>
+            <td :title="item.hasLrcFile || hasLyrics(item) ? t('lyrTitle') : ''">{{ lrcMark(item) }}</td>
             <td>{{ item.tags.DATE || '' }}</td>
             <td>{{ item.tags.GENRE || '' }}</td>
             <td class="muted">{{ fmtSize(item.size) }}</td>
           </tr>
           <tr v-if="!shown.length">
-            <td colspan="11" class="muted" style="padding:16px;text-align:center">
+            <td colspan="10" class="muted" style="padding:16px;text-align:center">
               {{ state.tracks.length ? t('noMatch') : t('noTracks') }}
             </td>
           </tr>

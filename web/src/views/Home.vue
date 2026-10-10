@@ -1,16 +1,16 @@
 <script setup>
 import { ref } from 'vue'
-import { state, toast } from '../store.js'
+import { state } from '../store.js'
 import { t } from '../i18n.js'
 import Login from './Login.vue'
 
-// 公开首页：搜索框为占位（暂不接入功能），登录/进入后台按钮切换至后台区。
+// 公开首页：仅展示项目介绍；搜索区默认隐藏（后续接入功能时启用）。
 const q = ref('')
 const showLogin = ref(false)
 
 function doSearch() {
+  // 搜索功能暂未接入，保留入口供后续开发。
   if (!q.value.trim()) return;
-  toast(t('comingSoon'), '');
 }
 
 function enterApp() {
@@ -26,8 +26,8 @@ function enterApp() {
       <h1 class="home-title">LNH-MusicTag</h1>
       <p class="home-tag">{{ t('homeTagline') }}</p>
 
-      <!-- 搜索框（占位，暂不接入功能） -->
-      <div class="home-search">
+      <!-- 搜索区（默认隐藏，接入功能时移除 style="display:none" 即可启用） -->
+      <div class="home-search" style="display:none">
         <input type="text" v-model="q" :placeholder="t('homeSearchPh')" @keydown.enter="doSearch" />
         <button @click="doSearch">{{ t('homeSearchBtn') }}</button>
       </div>

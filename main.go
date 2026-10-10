@@ -331,6 +331,7 @@ func main() {
 	// 通用插件设置接口：列出/启停/配置全部插件（刮削源、FFmpeg、预留类型）
 	pm.HandleFunc("GET /api/plugins", pluginsHandler(cfg))
 	pm.HandleFunc("POST /api/plugins", pluginsUpdateHandler(cfg))
+	pm.HandleFunc("POST /api/plugins/import", pluginsImportHandler(cfg))
 	pm.HandleFunc("POST /api/convert", convertHandler(jobs, store, cfg))
 	pm.HandleFunc("GET /api/ffmpeg/status", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, ffmpegStatus(cfg))
@@ -352,6 +353,11 @@ func main() {
 	pm.HandleFunc("POST /api/identify", identifyHandler(jobs, store, ms))
 	pm.HandleFunc("GET /api/version", updates.versionHandler)
 	pm.HandleFunc("GET /api/version/check", updates.versionCheckHandler)
+	// 音乐解锁插件（tool.unlock）：上传体可能超过 limitBody 的 8MiB 限制，
+	// 因此挂在 mux 顶层（仍 requireAuth + csrfGuard；执行逻辑见 unlock_plugin.go）。
+	mux.Handle("POST /api/unlock", sessions.requireAuth(csrfGuard(unlockHandler(cfg))))
+	mux.Handle("GET /api/unlock/dl/{token}", sessions.requireAuth(unlockDownloadHandler()))
+	mux.Handle("POST /api/unlock/save", sessions.requireAuth(csrfGuard(unlockSaveHandler(store, cfg))))
 	mux.Handle("/api/", sessions.requireAuth(csrfGuard(limitBody(pm))))
 
 	// Static UI (Vue SPA built into web/dist; /api/... routes win over this)
@@ -534,9 +540,15 @@ func main() {
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "已保存"})
 	})
 
-	// List tracks
+	// List tracks. 每次返回时动态重算 garbled/needsIdentify 标记（覆盖扫描
+	// 时快照），升级后无需重新扫描，"乱码/待识别"筛选立即按最新算法生效。
 	pm.HandleFunc("GET /api/tracks", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, store.all())
+		tracks := store.all()
+		for _, t := range tracks {
+			t.Garbled = looksGarbledTags(t)
+			t.NeedsIdentify = needsIdentify(t)
+		}
+		writeJSON(w, http.StatusOK, tracks)
 	})
 
 	// Duplicates (hash-based, plus fingerprint if available)
@@ -666,27 +678,9 @@ func main() {
 		renamed := false
 		newName := t.FileName
 		if title := strings.TrimSpace(req.Tags["TITLE"]); title != "" {
-			artist := strings.TrimSpace(req.Tags["ARTIST"])
-			wantBase := sanitizeName(title)
-			if artist != "" {
-				wantBase = sanitizeName(artist) + " - " + wantBase
-			}
-			ext := strings.ToLower(strings.TrimPrefix(t.Ext, "."))
-			if ext == "" {
-				ext = "mp3"
-			}
-			if stripAudioExt(t.FileName) != wantBase {
-				newPath := filepath.Join(filepath.Dir(t.Path), wantBase+"."+ext)
-				if newPath != t.Path {
-					if _, serr := os.Stat(newPath); serr != nil {
-						if rerr := os.Rename(t.Path, newPath); rerr == nil {
-							store.removeByPath(t.Path)
-							refreshTrack(store, newPath)
-							renamed = true
-							newName = filepath.Base(newPath)
-						}
-					}
-				}
+			if newPath := renameFileToArtistTitle(store, t, req.Tags["ARTIST"], title); newPath != "" {
+				renamed = true
+				newName = filepath.Base(newPath)
 			}
 		}
 		if !renamed {
@@ -872,7 +866,7 @@ func main() {
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "scraped"})
 	})
 
-	addr := ":10248"
+	addr := getenvDefault("LNH_PORT", ":10248")
 	log.Printf("LNH-MusicTag listening on http://localhost%s", addr)
 	log.Printf("admin user: %q (config stored in %s/lnh.db)", adminUser, configDir)
 	if generated {

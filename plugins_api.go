@@ -6,6 +6,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 
 	"LNH-musictag/internal/scrape"
@@ -59,6 +60,17 @@ func registerBuiltinPlugins(cfg *cstore.Config, ms *scrape.MultiSource) {
 		},
 	}
 	registerPlugin(ff, nil)
+	// 音乐解锁插件（tool.unlock）：执行逻辑见 unlock_plugin.go。
+	// 内置注册以保证重启后仍在（loadPluginsFromDB 只恢复已注册插件状态）；
+	// unlock.plugin.json 声明保留作导入参考（内置同名时导入会提示已存在）。
+	registerPlugin(&Plugin{
+		Name:    unlockPluginName,
+		Label:   "音乐解锁",
+		Kind:    PluginTool,
+		Enabled: true,
+		Version: "1.0.0",
+		Hint:    "解锁网易云(NCM/UC)、QQ音乐(QMC/MFLAC/MGG/缓存/TM)、酷狗(KGM/VPR)、酷我(KWM)、虾米(XM)、咪咕(MG3D)、喜马拉雅(X2M/X3M)等加密音乐格式。",
+	}, nil)
 	// 预留类型注册示例（后续实现时在此补充）：
 	//   registerPlugin(&Plugin{Name:"download.example", Label:"…", Kind:PluginDownload,...})
 	//   registerPlugin(&Plugin{Name:"protocol.subsonic", Label:"Subsonic", Kind:PluginProtocol,...})
@@ -87,6 +99,87 @@ func pluginsHandler(cfg *cstore.Config) http.HandlerFunc {
 			}
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"plugins": list})
+	}
+}
+
+// pluginImportDecl 第三方插件导入声明（与 Plugin 同构的 JSON 子集）。
+type pluginImportDecl struct {
+	Name    string        `json:"name"`
+	Label   string        `json:"label"`
+	Kind    string        `json:"kind"`
+	Version string        `json:"version,omitempty"`
+	Hint    string        `json:"hint,omitempty"`
+	Fields  []PluginField `json:"fields,omitempty"`
+}
+
+// pluginsImportHandler POST /api/plugins/import 导入第三方插件声明。
+// body 支持三种形态：单对象、{"plugins":[...]}、裸数组。
+// 校验：name 非空且不得与已注册插件冲突（防止覆盖内置/重复导入）、
+// kind 必须合法。导入成功即注册并持久化（重启后仍在插件列表）。
+// 说明：当前版本第三方插件先以"声明 + 启停 + 配置管理"接入；执行逻辑
+// 通过源码扩展点接入（见 docs/PLUGINS.md）。
+func pluginsImportHandler(cfg *cstore.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var decls []pluginImportDecl
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 256<<10))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body: " + err.Error()})
+			return
+		}
+		// 先探测形态：{plugins:[...]} / 裸数组 / 单对象
+		var probe struct {
+			Plugins []pluginImportDecl `json:"plugins"`
+		}
+		switch {
+		case json.Unmarshal(body, &probe) == nil && len(probe.Plugins) > 0:
+			decls = probe.Plugins
+		case json.Unmarshal(body, &decls) == nil && len(decls) > 0:
+			// 裸数组
+		default:
+			var one pluginImportDecl
+			if json.Unmarshal(body, &one) == nil && one.Name != "" {
+				decls = []pluginImportDecl{one}
+			}
+		}
+		if len(decls) == 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "插件声明为空或格式不正确"})
+			return
+		}
+		existing := map[string]bool{}
+		for _, p := range pluginsSnapshot() {
+			existing[p.Name] = true
+		}
+		imported := []Plugin{}
+		for _, d := range decls {
+			if d.Name == "" || d.Label == "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "插件 name/label 不能为空: " + d.Name})
+				return
+			}
+			kind := PluginKind(d.Kind)
+			switch kind {
+			case PluginScrape, PluginTool, PluginDownload, PluginProtocol:
+			default:
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "非法插件类型 kind: " + d.Kind + "（可选 scrape/tool/download/protocol）"})
+				return
+			}
+			if existing[d.Name] {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "插件已存在（内置或已导入）: " + d.Name})
+				return
+			}
+			registerPlugin(&Plugin{
+				Name:    d.Name,
+				Label:   d.Label,
+				Kind:    kind,
+				Enabled: true,
+				Version: d.Version,
+				Hint:    d.Hint,
+				Fields:  d.Fields,
+			}, nil)
+			existing[d.Name] = true
+			imported = append(imported, Plugin{Name: d.Name, Label: d.Label, Kind: kind, Enabled: true, Version: d.Version, Hint: d.Hint, Fields: d.Fields, Config: map[string]string{}})
+		}
+		savePluginsToDB(cfg)
+		writeJSON(w, http.StatusOK, map[string]any{"imported": imported, "plugins": pluginsSnapshot()})
 	}
 }
 

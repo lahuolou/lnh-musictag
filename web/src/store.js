@@ -39,12 +39,24 @@ export function cur() { return state.tracks.find(t => t.id === state.currentId) 
 //   已是最新或查询失败均静默。
 export const verState = { ver: null, showUpdate: false }
 
+// verNewer 数值化逐段比较版本：latest 是否比 current 新（1.4.50 → 1.5.0 判新，
+// "1.4.3" vs "1.4.7" 判旧）。与后端 hasUpdate 口径一致，避免字符串比较误判。
+function verNewer(latest, current) {
+  const pa = String(latest || '').replace(/^v/i, '').split('.').map(x => parseInt(x, 10) || 0);
+  const pb = String(current || '').replace(/^v/i, '').split('.').map(x => parseInt(x, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const a = pa[i] || 0, b = pb[i] || 0;
+    if (a !== b) return a > b;
+  }
+  return false;
+}
+
 export async function checkVersion(force = false) {
   const url = force ? '/api/version/check' : '/api/version';
   try {
     const v = await api(url);
     state.version = v.current || '';
-    const newer = !!(v.latest && v.status === 'ok' && v.latest !== v.current);
+    const newer = !!(v.latest && v.status === 'ok' && verNewer(v.latest, v.current));
     if (newer) {
       verState.ver = v;
       // 自动检查：同一版本号每个会话只弹一次，避免刷新反复打扰；
@@ -58,7 +70,7 @@ export async function checkVersion(force = false) {
       verState.ver = null;
       if (force) {
         if (v.status === 'fail') toast(t('checkUpdateFail'), 'err');
-        else if (v.latest && v.latest === v.current) toast(t('upToDate'));
+        else if (v.status === 'ok') toast(t('upToDate'));
         else toast(t('checkUpdateFail'));
       }
     }

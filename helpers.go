@@ -77,6 +77,45 @@ func sanitizeName(s string) string {
 	return strings.TrimSpace(s)
 }
 
+// renameFileToArtistTitle renames a track file to "艺术家 - 标题.后缀" when the
+// current filename no longer matches its (new) artist/title tags. Used after
+// editing tags and after batch scraping, so "Unknown - 开始恋爱.flac" becomes
+// "E-kids - 开始恋爱.flac" once the real artist is known. Skips when the name
+// already matches, the artist/title is unusable (Unknown/garbled/empty), or the
+// target already exists (never overwrite). Returns the new path, or "" if no
+// rename happened.
+func renameFileToArtistTitle(store *store, t *model.Track, artist, title string) string {
+	artist = strings.TrimSpace(artist)
+	title = strings.TrimSpace(title)
+	if artist == "" || title == "" || looksUnknown(artist) || looksGarbled(artist) || looksGarbled(title) {
+		return ""
+	}
+	want := sanitizeName(artist) + " - " + sanitizeName(stripAudioExt(title))
+	if stripAudioExt(t.FileName) == want {
+		return ""
+	}
+	ext := strings.TrimPrefix(strings.ToLower(t.Ext), ".")
+	if ext == "" {
+		ext = strings.TrimPrefix(strings.ToLower(filepath.Ext(t.FileName)), ".")
+	}
+	if ext == "" {
+		ext = "mp3"
+	}
+	newPath := filepath.Join(filepath.Dir(t.Path), want+"."+ext)
+	if newPath == t.Path {
+		return ""
+	}
+	if _, err := os.Stat(newPath); err == nil {
+		return "" // 目标已存在，避免覆盖其他文件
+	}
+	if err := os.Rename(t.Path, newPath); err != nil {
+		return ""
+	}
+	store.removeByPath(t.Path)
+	refreshTrack(store, newPath)
+	return newPath
+}
+
 // renameCleanFile renames an audio file so it keeps only its real extension,
 // determined from the actual encoding (magic bytes), not the current suffix.
 //   - "发如雪.mp3.flac" (real FLAC) -> "发如雪.flac"

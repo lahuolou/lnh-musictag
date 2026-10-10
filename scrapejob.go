@@ -78,6 +78,9 @@ func fieldsFromList(list []string, fetchCover, fetchLyrics bool) ScrapeFields {
 // field. Mojibake text is NOT a usable value: garbled tags are treated as
 // missing so scraping/repair can overwrite them (previously the smart-skip
 // protected broken labels and the "乱码修复/批量补全" never touched them).
+// "Unknown"/"未知" placeholder values are also treated as missing, so files
+// like "Unknown - 开始恋爱.flac" still get their real artist scraped and the
+// filename renamed accordingly.
 // field is a taglibx constant (e.g. taglibx.Title) or "cover"/"lyrics".
 func trackHasField(t *model.Track, field string) bool {
 	switch field {
@@ -85,10 +88,10 @@ func trackHasField(t *model.Track, field string) bool {
 		return t.HasCover
 	case "lyrics":
 		v := strings.TrimSpace(t.Tags["LYRICS"])
-		return v != "" && !looksGarbledText(v)
+		return v != "" && !looksGarbledText(v) && !looksUnknown(v)
 	default:
 		v := strings.TrimSpace(t.Tags[field])
-		return v != "" && !looksGarbledText(v)
+		return v != "" && !looksGarbledText(v) && !looksUnknown(v)
 	}
 }
 
@@ -384,9 +387,22 @@ func scrapeOneTrack(t *model.Track, ms *scrape.MultiSource, source string, field
 			tags[taglibx.Lyrics] = []string{lyric}
 		}
 	}
+	newPath := ""
 	if len(tags) > 0 {
 		if err := taglibx.WriteTags(t.Path, tags, false); err != nil {
 			return "写标签失败: " + err.Error(), false
+		}
+		// 标签与文件名不符时重命名「艺术家 - 标题.后缀」（如
+		// Unknown - 开始恋爱.flac → E-kids - 开始恋爱.flac）
+		artist, title := "", ""
+		if a := tags[taglibx.Artist]; len(a) > 0 {
+			artist = a[0]
+		}
+		if tt := tags[taglibx.Title]; len(tt) > 0 {
+			title = tt[0]
+		}
+		if artist != "" || title != "" {
+			newPath = renameFileToArtistTitle(store, t, artist, title)
 		}
 	}
 	if fields.Cover {
@@ -394,7 +410,9 @@ func scrapeOneTrack(t *model.Track, ms *scrape.MultiSource, source string, field
 			taglibx.WriteCover(t.Path, img)
 		}
 	}
-	refreshTrack(store, t.Path)
+	if newPath == "" {
+		refreshTrack(store, t.Path)
+	}
 
 	var wrote []string
 	if fields.Title {

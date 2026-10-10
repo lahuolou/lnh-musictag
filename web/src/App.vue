@@ -69,16 +69,18 @@ onMounted(async () => {
       <span v-if="state.toolJob && state.toolJob.status === 'running'" class="badge batch" :title="t('jobRunningTitle')" @click="tab('batch')">
         {{ t('jobRunning', { d: state.toolJob.done, t: state.toolJob.total, c: '' }) }}
       </span>
-      <button class="ghost sm" :title="lang === 'zh' ? 'Switch to English' : '切换到中文'" @click="toggleLang">{{ lang === 'zh' ? 'EN' : '中' }}</button>
-      <button class="navlink" :title="theme === 'dark' ? t('lightMode') : t('darkMode')" @click="toggleTheme">{{ theme === 'dark' ? '🌙' : '☀️' }}</button>
       <button class="ghost sm" :class="{ on: state.activeTab !== 'settings' && state.activeTab !== 'plugins' }" @click="tab('list')">{{ t('list') }}</button>
-      <button class="ghost sm" :title="t('home')" @click="goHome">🏠</button>
-      <!-- 齿轮二级导航：设置 / 关于 / 检查更新 / 退出（悬停或点击弹出） -->
+      <button class="ghost sm" :title="t('home')" @click="goHome">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      </button>
+      <!-- 齿轮二级导航：主题 / 语言 / 设置 / 插件 / 关于 / 检查更新 / 退出 -->
       <div class="gear" :class="{ open: gearOpen }" @click="gearOpen = !gearOpen">
         <button class="ghost sm gear-btn" :title="t('menu')">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
         <div class="gear-menu" @click.stop>
+          <button @click="toggleTheme(); gearOpen = false">{{ theme === 'dark' ? t('darkMode') : t('lightMode') }}</button>
+          <button @click="toggleLang(); gearOpen = false">{{ lang === 'zh' ? '切换 CN' : 'Switch EN' }}</button>
           <button @click="tab('settings'); gearOpen = false">{{ t('settings') }}</button>
           <button @click="tab('plugins'); gearOpen = false">{{ t('plugins') }}</button>
           <button @click="aboutOpen = true; gearOpen = false">{{ t('about') }}</button>

@@ -5,7 +5,7 @@ import { api } from '../api.js'
 import { t } from '../i18n.js'
 
 const emit = defineEmits(['done'])
-const user = ref('admin')
+const user = ref('')
 const pass = ref('')
 const msg = ref('')
 const showPw = ref(false)
